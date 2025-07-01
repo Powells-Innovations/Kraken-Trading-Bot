@@ -1046,7 +1046,20 @@ async function connectToLiveData() {
         debugLog('🔄 Attempting multiple methods for real API access...');
         
         let realConnection = false;
-        
+
+        setTimeout(() => {
+    if (!realConnection) {
+        logMessage('⚠️ Unable to connect to Kraken API. Switching to simulation mode.', 'warning');
+        // Trigger fallback logic here
+    }
+}, 5000); // 5 seconds
+setTimeout(() => {
+    if (!realConnection) {
+        logMessage('⚠️ Unable to connect to Kraken API. Switching to simulation mode.', 'warning');
+        // Trigger fallback logic here
+    }
+}, 5000); // 5 seconds
+11        
         // Method 1: Direct API call with enhanced headers
         try {
             const response = await fetch(`${KRAKEN_PUBLIC_API}/Time`, {
