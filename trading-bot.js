@@ -464,8 +464,15 @@ class TradingBot {
             const best = opportunities[0];
             
             // Additional safety check: ensure we're not over-risking
-            if (this.calculateTradeRisk(best.pair, best.data.price, best.decision.stopLoss) <= this.settings.maxRiskPerTrade) {
-                if (this.executeTrade(best.pair, best.decision.side, best.data.price, `AI Swing: ${best.decision.reason}`, best.decision.stopLoss, best.decision.takeProfit, best.decision.confidence)) {
+            const tradeRisk = this.calculateTradeRisk(best.pair, best.data.price, best.decision.stopLoss);
+            this.debugLog(`[SWING] Trade risk for ${best.pair}: ${tradeRisk.toFixed(1)}% (max: ${this.settings.maxRiskPerTrade * 100}%)`, 'info');
+            
+            if (tradeRisk <= this.settings.maxRiskPerTrade * 100) {
+                this.debugLog(`[SWING] Attempting to execute trade for ${best.pair}...`, 'info');
+                const executionResult = await this.executeTrade(best.pair, best.decision.side, best.data.price, `AI Swing: ${best.decision.reason}`, best.decision.stopLoss, best.decision.takeProfit, best.decision.confidence);
+                this.debugLog(`[SWING] Execute trade result for ${best.pair}: ${executionResult}`, 'info');
+                
+                if (executionResult) {
                     this.tradeCounter++;
                     this.debugLog(`🤖 AI Trade: ${best.decision.side} ${best.pair} | Confidence: ${(best.decision.confidence*100).toFixed(1)}% | R/R: ${best.decision.riskRewardRatio}:1 | SL: £${best.decision.stopLoss} | TP: £${best.decision.takeProfit}`, 'success');
                     
@@ -1074,6 +1081,8 @@ class TradingBot {
      */
     async executeTrade(pair, side, price, reason = 'Signal', aiStopLoss = null, aiTakeProfit = null, aiConfidence = 1) {
         try {
+            this.debugLog(`[executeTrade] Starting trade execution for ${pair}: ${side} at £${price}`, 'info');
+            
             if (!this.canTrade(pair)) {
                 this.debugLog(`[executeTrade] Not executing trade for ${pair} - canTrade returned false`, 'warning');
                 return false;
@@ -1082,6 +1091,7 @@ class TradingBot {
             // Calculate position size based on risk management
             const accountBalance = this.tradingStats.accountBalance;
             const maxRiskAmount = accountBalance * this.settings.maxRiskPerTrade; // 10% of account
+            this.debugLog(`[executeTrade] Account balance: £${accountBalance}, Max risk amount: £${maxRiskAmount}`, 'info');
             
             // Calculate position size based on stop loss distance
             let positionSize = 0;
@@ -1089,17 +1099,21 @@ class TradingBot {
                 const riskPerUnit = Math.abs(price - aiStopLoss);
                 if (riskPerUnit > 0) {
                     positionSize = maxRiskAmount / riskPerUnit;
+                    this.debugLog(`[executeTrade] Position size from stop loss: ${positionSize.toFixed(6)}`, 'info');
                 }
             }
             
             // Fallback to fixed investment if no stop loss
             if (positionSize <= 0) {
-                positionSize = this.getDynamicInvestment(pair, aiConfidence) / price;
+                const dynamicInvestment = this.getDynamicInvestment(pair, aiConfidence);
+                positionSize = dynamicInvestment / price;
+                this.debugLog(`[executeTrade] Position size from dynamic investment: ${positionSize.toFixed(6)}`, 'info');
             }
             
             // Ensure minimum position size
             if (positionSize <= 0) {
                 positionSize = this.settings.maxInvestment / price;
+                this.debugLog(`[executeTrade] Position size from max investment: ${positionSize.toFixed(6)}`, 'info');
             }
             
             // Ensure position size doesn't exceed max investment
@@ -1108,9 +1122,11 @@ class TradingBot {
             
             // Calculate actual investment amount
             const investment = positionSize * price;
+            this.debugLog(`[executeTrade] Final position size: ${positionSize.toFixed(6)}, Investment: £${investment.toFixed(2)}`, 'info');
             
             // Final safety check: ensure we're not over-risking
             const tradeRisk = this.calculateTradeRisk(pair, price, aiStopLoss || (price * 0.9));
+            this.debugLog(`[executeTrade] Calculated trade risk: ${tradeRisk.toFixed(1)}% (max: ${this.settings.maxRiskPerTrade * 100}%)`, 'info');
             if (tradeRisk > this.settings.maxRiskPerTrade * 100) {
                 this.debugLog(`[executeTrade] Blocked: trade risk too high (${tradeRisk.toFixed(1)}%)`, 'warning');
                 return false;
@@ -1189,6 +1205,7 @@ class TradingBot {
 
             const modeIcon = this.tradingMode === 'live' ? '💰' : '📊';
             this.debugLog(`${modeIcon} ${side} ${pair}: £${investment.toFixed(2)} at £${price.toFixed(4)} | Qty: ${positionSize.toFixed(6)} | Risk: ${tradeRisk.toFixed(1)}% | Reason: ${reason}`, 'success');
+            this.debugLog(`[executeTrade] Trade successfully executed and recorded`, 'success');
             
             if (window.app) {
                 window.app.addLogEntry({
@@ -1207,9 +1224,11 @@ class TradingBot {
                 // Update UI immediately after trade execution
                 window.app.updateStatistics();
             }
+            this.debugLog(`[executeTrade] Trade execution completed successfully`, 'success');
             return true;
         } catch (error) {
-            this.debugLog(`Failed to execute trade: ${error.message}`, 'error');
+            this.debugLog(`[executeTrade] Failed to execute trade: ${error.message}`, 'error');
+            this.debugLog(`[executeTrade] Error stack: ${error.stack}`, 'error');
             return false;
         }
     }
