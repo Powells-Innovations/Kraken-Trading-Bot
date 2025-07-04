@@ -13,7 +13,7 @@
 
 class YahooAPI {
     constructor() {
-        this.baseUrl = 'https://query1.finance.yahoo.com/v8/finance';
+        this.baseUrl = 'https://kraken-trading-bot-production.up.railway.app/api/yahoo';
         this.isConnected = false;
         this.lastUpdate = null;
         this.retryCount = 0;
@@ -98,15 +98,18 @@ class YahooAPI {
      */
     async getStockQuote(ticker) {
         try {
-            const url = `${this.baseUrl}/chart/${ticker}?interval=1m&range=1d&includePrePost=false&events=div%2Csplit`;
-            this.debugLog(`Fetching quote for ${ticker}...`, 'api');
+            const url = `${this.baseUrl}/quote/${ticker}`;
+            this.debugLog(`Fetching quote for ${ticker} via proxy...`, 'api');
             
             const response = await fetch(url, {
                 method: 'GET',
                 headers: {
-                    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
+                    'Accept': 'application/json',
+                    'Content-Type': 'application/json',
+                    'Origin': window.location.origin
                 },
-                timeout: 5000
+                mode: 'cors',
+                credentials: 'omit'
             });
             
             if (!response.ok) {
@@ -179,26 +182,77 @@ class YahooAPI {
         }
 
         try {
-            this.debugLog('Fetching stock data...', 'api');
+            this.debugLog('Fetching stock data via proxy...', 'api');
             
-            const stockData = {};
-            const promises = Object.keys(this.stocks).map(async (symbol) => {
-                try {
-                    const data = await this.getStockQuote(symbol); // Changed to getStockQuote
-                    if (data) {
-                        stockData[symbol] = data;
-                    }
-                } catch (error) {
-                    this.debugLog(`Failed to fetch ${symbol}: ${error.message}`, 'error');
-                }
+            const tickers = Object.keys(this.stocks);
+            const url = `${this.baseUrl}/quotes`;
+            
+            const response = await fetch(url, {
+                method: 'POST',
+                headers: {
+                    'Accept': 'application/json',
+                    'Content-Type': 'application/json',
+                    'Origin': window.location.origin
+                },
+                mode: 'cors',
+                credentials: 'omit',
+                body: JSON.stringify({ tickers })
             });
             
-            await Promise.all(promises);
+            if (!response.ok) {
+                throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+            }
             
-            this.debugLog(`✅ Fetched data for ${Object.keys(stockData).length} stocks`, 'success');
+            const batchData = await response.json();
+            const stockData = {};
+            
+            // Process each ticker's data
+            for (const ticker of tickers) {
+                const data = batchData[ticker];
+                if (data && !data.error && data.chart && data.chart.result && data.chart.result[0]) {
+                    const result = data.chart.result[0];
+                    const meta = result.meta;
+                    const timestamp = result.timestamp;
+                    const quote = result.indicators.quote[0];
+                    const adjClose = result.indicators.adjclose[0];
+                    
+                    // Get current price from the last available data point
+                    const lastIndex = timestamp.length - 1;
+                    const currentPrice = adjClose.adjclose[lastIndex] || quote.close[lastIndex];
+                    const openPrice = quote.open[lastIndex];
+                    const highPrice = quote.high[lastIndex];
+                    const lowPrice = quote.low[lastIndex];
+                    const volume = quote.volume[lastIndex];
+                    const prevClose = meta.previousClose;
+                    
+                    if (currentPrice && !isNaN(currentPrice)) {
+                        const change = currentPrice - prevClose;
+                        const changePercent = prevClose ? (change / prevClose) * 100 : 0;
+                        
+                        stockData[ticker] = {
+                            ticker: ticker,
+                            price: currentPrice,
+                            change: change,
+                            changePercent: changePercent,
+                            volume: volume || 0,
+                            high: highPrice || currentPrice,
+                            low: lowPrice || currentPrice,
+                            open: openPrice || currentPrice,
+                            prevClose: prevClose,
+                            timestamp: timestamp[lastIndex] * 1000,
+                            lastUpdate: Date.now(),
+                            isFallback: false
+                        };
+                    }
+                } else {
+                    this.debugLog(`No valid data for ${ticker}: ${data?.error || 'Invalid response'}`, 'warning');
+                }
+            }
+            
+            this.debugLog(`✅ Fetched data for ${Object.keys(stockData).length} stocks via proxy`, 'success');
             return stockData;
         } catch (error) {
-            this.debugLog(`Failed to fetch stock data: ${error.message}`, 'error');
+            this.debugLog(`Failed to fetch stock data via proxy: ${error.message}`, 'error');
             throw error;
         }
     }
@@ -212,10 +266,20 @@ class YahooAPI {
         }
 
         try {
-            this.debugLog(`Fetching historical data for ${ticker}...`, 'api');
+            this.debugLog(`Fetching historical data for ${ticker} via proxy...`, 'api');
             
-            const url = `${this.baseUrl}/chart/${ticker}?period=${period}&interval=${interval}`;
-            const response = await fetch(url);
+            const url = `${this.baseUrl}/history/${ticker}?period=${period}&interval=${interval}`;
+            
+            const response = await fetch(url, {
+                method: 'GET',
+                headers: {
+                    'Accept': 'application/json',
+                    'Content-Type': 'application/json',
+                    'Origin': window.location.origin
+                },
+                mode: 'cors',
+                credentials: 'omit'
+            });
             
             if (!response.ok) {
                 throw new Error(`HTTP ${response.status}: ${response.statusText}`);
@@ -237,13 +301,13 @@ class YahooAPI {
                     volume: quotes.volume[index] || 0
                 }));
                 
-                this.debugLog(`✅ Fetched ${historicalData.length} historical data points for ${ticker}`, 'success');
+                this.debugLog(`✅ Fetched ${historicalData.length} historical data points for ${ticker} via proxy`, 'success');
                 return historicalData;
             } else {
                 throw new Error('Invalid response format from Yahoo Finance API');
             }
         } catch (error) {
-            this.debugLog(`Failed to fetch historical data for ${ticker}: ${error.message}`, 'error');
+            this.debugLog(`Failed to fetch historical data for ${ticker} via proxy: ${error.message}`, 'error');
             throw error;
         }
     }
