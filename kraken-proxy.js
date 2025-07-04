@@ -30,26 +30,15 @@ const KRAKEN_BASE_URL = 'https://api.kraken.com';
 
 // Helper function to create HMAC signature for private API calls
 function createSignature(endpoint, postData, apiSecret) {
-  const nonce = Date.now().toString();
-  
-  // Create post data string
-  const postDataString = postData ? Object.keys(postData).map(key => `${key}=${postData[key]}`).join('&') : '';
-  
-  // Create the message to sign
-  const message = nonce + postDataString;
-  
-  // Create SHA256 hash of the message
-  const sha256Hash = crypto.createHash('sha256').update(message).digest('binary');
-  
-  // Create the signature path
-  const signaturePath = endpoint + sha256Hash;
-  
-  // Create HMAC-SHA512 signature
-  const signature = crypto.createHmac('sha512', apiSecret)
-    .update(signaturePath, 'binary')
-    .digest('base64');
-    
-  return { signature, nonce };
+  // postData must include nonce as the first param!
+  const postDataString = Object.keys(postData)
+    .map(key => `${key}=${postData[key]}`)
+    .join('&');
+  const message = Buffer.from(postData.nonce + postDataString);
+  const hash = require('crypto').createHash('sha256').update(message).digest();
+  const hmac = require('crypto').createHmac('sha512', Buffer.from(apiSecret, 'base64'));
+  const signature = hmac.update(Buffer.concat([Buffer.from(endpoint), hash])).digest('base64');
+  return signature;
 }
 
 // Proxy endpoint for Kraken ticker
@@ -93,7 +82,7 @@ app.post('/api/kraken/balance', async (req, res) => {
     const endpoint = '/0/private/Balance';
     const nonce = Date.now().toString();
     const postData = { nonce };
-    const { signature } = createSignature(endpoint, postData, apiSecret);
+    const signature = createSignature(endpoint, postData, apiSecret);
     
     const response = await fetch(`${KRAKEN_BASE_URL}${endpoint}`, {
       method: 'POST',
@@ -132,7 +121,7 @@ app.post('/api/kraken/buy', async (req, res) => {
     
     if (price) postData.price = price.toString();
     
-    const { signature, nonce } = createSignature(endpoint, postData, apiSecret);
+    const signature = createSignature(endpoint, postData, apiSecret);
     postData.nonce = nonce;
     
     const response = await fetch(`${KRAKEN_BASE_URL}${endpoint}`, {
@@ -172,7 +161,7 @@ app.post('/api/kraken/sell', async (req, res) => {
     
     if (price) postData.price = price.toString();
     
-    const { signature, nonce } = createSignature(endpoint, postData, apiSecret);
+    const signature = createSignature(endpoint, postData, apiSecret);
     postData.nonce = nonce;
     
     const response = await fetch(`${KRAKEN_BASE_URL}${endpoint}`, {
@@ -202,7 +191,9 @@ app.post('/api/kraken/open-orders', async (req, res) => {
     }
 
     const endpoint = '/0/private/OpenOrders';
-    const { signature, nonce } = createSignature(endpoint, {}, apiSecret);
+    const nonce = Date.now().toString();
+    const postData = { nonce };
+    const signature = createSignature(endpoint, postData, apiSecret);
     
     const response = await fetch(`${KRAKEN_BASE_URL}${endpoint}`, {
       method: 'POST',
@@ -236,7 +227,7 @@ app.post('/api/kraken/cancel-order', async (req, res) => {
       txid: txid
     };
     
-    const { signature, nonce } = createSignature(endpoint, postData, apiSecret);
+    const signature = createSignature(endpoint, postData, apiSecret);
     postData.nonce = nonce;
     
     const response = await fetch(`${KRAKEN_BASE_URL}${endpoint}`, {
@@ -266,14 +257,13 @@ app.post('/api/kraken/closed-orders', async (req, res) => {
     }
 
     const endpoint = '/0/private/ClosedOrders';
-    const postData = {
-      nonce: Date.now().toString()
-    };
+    const nonce = Date.now().toString();
+    const postData = { nonce };
     
     if (start) postData.start = start;
     if (end) postData.end = end;
     
-    const { signature, nonce } = createSignature(endpoint, postData, apiSecret);
+    const signature = createSignature(endpoint, postData, apiSecret);
     postData.nonce = nonce;
     
     const response = await fetch(`${KRAKEN_BASE_URL}${endpoint}`, {
@@ -306,7 +296,7 @@ app.post('/api/kraken/test-credentials', async (req, res) => {
     const endpoint = '/0/private/Balance';
     const nonce = Date.now().toString();
     const postData = { nonce };
-    const { signature } = createSignature(endpoint, postData, apiSecret);
+    const signature = createSignature(endpoint, postData, apiSecret);
     
     const response = await fetch(`${KRAKEN_BASE_URL}${endpoint}`, {
       method: 'POST',
