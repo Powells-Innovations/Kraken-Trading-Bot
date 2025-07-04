@@ -27,6 +27,15 @@ window.rejectLegalDisclaimer = function() {
     window.location.href = 'about:blank';
 };
 
+// Global API test function
+window.testApiConnection = function() {
+    if (window.app) {
+        window.app.testApiConnection();
+    } else {
+        console.error('Trading app not initialized');
+    }
+};
+
 // Check if legal disclaimer has been accepted
 function checkLegalDisclaimer() {
     const accepted = localStorage.getItem('legalDisclaimerAccepted');
@@ -207,6 +216,17 @@ class TradingApp {
                 try {
                     const tickerData = await this.krakenAPI.getTickerData();
                     this.pairData = { ...this.pairData, ...tickerData };
+                    
+                    // Update trading bot's chart data with new prices
+                    if (this.tradingBot) {
+                        Object.keys(tickerData).forEach(pair => {
+                            const data = tickerData[pair];
+                            if (data && data.price) {
+                                this.tradingBot.updateChartData(pair, data.price, Date.now());
+                            }
+                        });
+                    }
+                    
                     this.updateCryptoPairCards();
                     this.updateActiveTrades();
                     this.updateStatistics();
@@ -217,6 +237,7 @@ class TradingApp {
                     }
                 } catch (error) {
                     this.debugLog(`Price update failed: ${error.message}`, 'error');
+                    // Don't update UI when API fails - keep last known data
                 }
             }, 5000);
 
@@ -238,11 +259,28 @@ class TradingApp {
                 try {
                     const stockData = await this.yahooAPI.getStockData();
                     this.pairData = { ...this.pairData, ...stockData };
+                    
+                    // Update trading bot's chart data with new prices
+                    if (this.tradingBot) {
+                        Object.keys(stockData).forEach(symbol => {
+                            const data = stockData[symbol];
+                            if (data && data.price) {
+                                this.tradingBot.updateChartData(symbol, data.price, Date.now());
+                            }
+                        });
+                    }
+                    
                     this.updateStockPairCards();
                     this.updateActiveTrades();
                     this.updateStatistics();
+                    
+                    // Update trading bot with new data
+                    if (this.tradingBot && this.tradingBot.isTrading) {
+                        await this.tradingBot.checkActiveTrades(stockData);
+                    }
                 } catch (error) {
                     this.debugLog(`Stock price update failed: ${error.message}`, 'error');
+                    // Don't update UI when API fails - keep last known data
                 }
             }, 10000);
         }
@@ -1076,7 +1114,15 @@ class TradingApp {
                 return;
             }
 
+            // Basic validation
+            if (apiKey.length < 50 || apiSecret.length < 50) {
+                this.showNotification('Invalid API credentials format - keys should be longer', 'error');
+                return;
+            }
+
             this.debugLog('Testing API credentials...', 'info');
+            this.debugLog(`API Key length: ${apiKey.length}, Secret length: ${apiSecret.length}`, 'info');
+            
             const result = await this.krakenAPI.testCredentials(apiKey, apiSecret);
 
             if (result.success) {
@@ -1088,17 +1134,36 @@ class TradingApp {
                 this.apiSecret = apiSecret;
                 
                 // Update balance
-                await this.getAccountBalance();
+                try {
+                    await this.getAccountBalance();
+                } catch (balanceError) {
+                    this.debugLog(`Balance fetch failed but credentials are valid: ${balanceError.message}`, 'warning');
+                }
                 
                 this.debugLog('API credentials stored in memory (session only)', 'info');
             } else {
                 this.showNotification(`API test failed: ${result.error}`, 'error');
                 this.logMessage(`❌ API test failed: ${result.error}`, 'error');
+                this.debugLog(`API test failed with error: ${result.error}`, 'error');
+                
+                // Provide helpful debugging information
+                if (result.error.includes('Invalid signature')) {
+                    this.debugLog('This usually means the API secret is incorrect or the signature generation is wrong', 'error');
+                } else if (result.error.includes('Invalid key')) {
+                    this.debugLog('This usually means the API key is incorrect', 'error');
+                } else if (result.error.includes('Permission denied')) {
+                    this.debugLog('This usually means the API key lacks required permissions (need "View" permission)', 'error');
+                }
             }
         } catch (error) {
             this.showNotification(`API test failed: ${error.message}`, 'error');
             this.logMessage(`❌ API test failed: ${error.message}`, 'error');
             this.debugLog(`API test error: ${error.message}`, 'error');
+            
+            // Check if it's a network error
+            if (error.message.includes('fetch') || error.message.includes('network')) {
+                this.debugLog('Network error - check if the proxy server is running', 'error');
+            }
         }
     }
 }
