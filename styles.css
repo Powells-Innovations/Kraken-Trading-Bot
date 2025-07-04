@@ -722,3 +722,146 @@ body {
     position: relative !important;
     z-index: 10 !important;
 } 
+
+/* Legal Disclaimer Modal Styles */
+.legal-disclaimer {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background-color: rgba(0, 0, 0, 0.9);
+    z-index: 10000;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    padding: 20px;
+}
+
+.legal-content {
+    background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
+    border: 2px solid #f0b90b;
+    border-radius: 15px;
+    padding: 30px;
+    max-width: 800px;
+    max-height: 90vh;
+    overflow-y: auto;
+    color: #ffffff;
+    box-shadow: 0 20px 40px rgba(0, 0, 0, 0.5);
+}
+
+.legal-content h2 {
+    color: #f0b90b;
+    text-align: center;
+    margin-bottom: 25px;
+    font-size: 1.8em;
+    border-bottom: 2px solid #f0b90b;
+    padding-bottom: 10px;
+}
+
+.legal-content h3 {
+    color: #00ff88;
+    margin-top: 25px;
+    margin-bottom: 15px;
+    font-size: 1.3em;
+}
+
+.legal-content p {
+    margin-bottom: 15px;
+    line-height: 1.6;
+}
+
+.legal-content ul {
+    margin-bottom: 20px;
+    padding-left: 20px;
+}
+
+.legal-content li {
+    margin-bottom: 8px;
+    line-height: 1.5;
+}
+
+.legal-content strong {
+    color: #f0b90b;
+}
+
+.legal-buttons {
+    display: flex;
+    gap: 15px;
+    justify-content: center;
+    margin-top: 30px;
+    flex-wrap: wrap;
+}
+
+.legal-buttons .btn {
+    padding: 12px 24px;
+    font-size: 1.1em;
+    font-weight: bold;
+    border-radius: 8px;
+    cursor: pointer;
+    transition: all 0.3s ease;
+    min-width: 150px;
+}
+
+.legal-buttons .btn-success {
+    background: linear-gradient(45deg, #00ff88, #00cc6a);
+    border: none;
+    color: #000;
+}
+
+.legal-buttons .btn-success:hover {
+    background: linear-gradient(45deg, #00cc6a, #00aa55);
+    transform: translateY(-2px);
+    box-shadow: 0 5px 15px rgba(0, 255, 136, 0.3);
+}
+
+.legal-buttons .btn-danger {
+    background: linear-gradient(45deg, #ff4444, #cc3333);
+    border: none;
+    color: #fff;
+}
+
+.legal-buttons .btn-danger:hover {
+    background: linear-gradient(45deg, #cc3333, #aa2222);
+    transform: translateY(-2px);
+    box-shadow: 0 5px 15px rgba(255, 68, 68, 0.3);
+}
+
+/* Scrollbar styling for legal content */
+.legal-content::-webkit-scrollbar {
+    width: 8px;
+}
+
+.legal-content::-webkit-scrollbar-track {
+    background: #1a1a2e;
+    border-radius: 4px;
+}
+
+.legal-content::-webkit-scrollbar-thumb {
+    background: #f0b90b;
+    border-radius: 4px;
+}
+
+.legal-content::-webkit-scrollbar-thumb:hover {
+    background: #d4a017;
+}
+
+/* API Security Notice */
+.api-security-notice {
+    background: linear-gradient(135deg, #ff4444 0%, #cc3333 100%);
+    color: white;
+    padding: 15px;
+    border-radius: 8px;
+    margin: 15px 0;
+    border-left: 4px solid #ff0000;
+}
+
+.api-security-notice h4 {
+    margin: 0 0 10px 0;
+    color: #fff;
+}
+
+.api-security-notice p {
+    margin: 5px 0;
+    font-size: 0.9em;
+} 
