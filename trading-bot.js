@@ -9,6 +9,9 @@
  * distribution, or use of this software, via any medium, is strictly prohibited.
  * 
  * For licensing inquiries, contact: licensing@tradingbotai.com
+ * 
+ * SECURITY NOTE: This module stores trading settings in localStorage but NEVER stores API keys.
+ * API keys are only stored in browser memory (RAM) and are automatically cleared when the page is closed.
  */
 
 class TradingBot {
