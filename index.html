@@ -19,6 +19,57 @@
     <link rel="stylesheet" href="styles.css">
 </head>
 <body>
+    <!-- LEGAL DISCLAIMER AND PRIVACY NOTICE -->
+    <div id="legalDisclaimer" class="legal-disclaimer" style="display: none;">
+        <div class="legal-content">
+            <h2>⚠️ IMPORTANT LEGAL DISCLAIMER & PRIVACY NOTICE</h2>
+            
+            <h3>🔐 API KEY SECURITY & STORAGE</h3>
+            <p><strong>CRITICAL:</strong> This application handles your Kraken API credentials. Please read this notice carefully:</p>
+            
+            <ul>
+                <li><strong>Memory Storage:</strong> API keys are temporarily stored in browser memory (RAM) only while the application is running</li>
+                <li><strong>No Persistent Storage:</strong> API keys are NEVER saved to localStorage, sessionStorage, cookies, or any persistent storage</li>
+                <li><strong>Session Only:</strong> API keys are automatically cleared when you close the browser tab or refresh the page</li>
+                <li><strong>Secure Transmission:</strong> API keys are transmitted securely via HTTPS to our proxy server for Kraken API calls</li>
+                <li><strong>No Server Storage:</strong> Our proxy server does not store your API keys - they are used only for the duration of each API request</li>
+            </ul>
+            
+            <h3>⚖️ LEGAL COMPLIANCE</h3>
+            <ul>
+                <li><strong>GDPR Compliance:</strong> No personal data is stored or processed beyond what's necessary for API communication</li>
+                <li><strong>Data Minimization:</strong> We only collect and process the minimum data required for trading functionality</li>
+                <li><strong>Right to Deletion:</strong> You can clear all data by simply closing the browser tab</li>
+                <li><strong>No Third-Party Sharing:</strong> Your API credentials are never shared with third parties</li>
+            </ul>
+            
+            <h3>⚠️ RISK DISCLAIMERS</h3>
+            <ul>
+                <li><strong>Trading Risk:</strong> Cryptocurrency trading involves substantial risk of loss. Only trade with funds you can afford to lose</li>
+                <li><strong>No Financial Advice:</strong> This software is for educational and research purposes only. Not financial advice</li>
+                <li><strong>API Permissions:</strong> Ensure your Kraken API keys have appropriate permissions (read-only for demo mode)</li>
+                <li><strong>Technical Risk:</strong> Software bugs or technical issues may result in financial losses</li>
+                <li><strong>Market Risk:</strong> Cryptocurrency markets are highly volatile and unpredictable</li>
+            </ul>
+            
+            <h3>🔒 SECURITY RECOMMENDATIONS</h3>
+            <ul>
+                <li>Use API keys with minimal required permissions</li>
+                <li>Never share your API credentials with anyone</li>
+                <li>Monitor your account activity regularly</li>
+                <li>Use demo mode for testing before live trading</li>
+                <li>Keep your browser and system updated</li>
+            </ul>
+            
+            <p><strong>By using this application, you acknowledge that you have read, understood, and agree to these terms.</strong></p>
+            
+            <div class="legal-buttons">
+                <button onclick="acceptLegalDisclaimer()" class="btn btn-success">I Accept & Continue</button>
+                <button onclick="rejectLegalDisclaimer()" class="btn btn-danger">I Decline - Exit Application</button>
+            </div>
+        </div>
+    </div>
+
     <div class="container">
         <!-- Header -->
         <header class="header">
@@ -90,6 +141,17 @@
             <!-- API Credentials (Live Mode Only) -->
             <div id="apiSection" class="api-section" style="display: none;">
                 <h4>🔐 Kraken API Credentials</h4>
+                
+                <!-- API Security Notice -->
+                <div class="api-security-notice">
+                    <h4>⚠️ SECURITY WARNING</h4>
+                    <p><strong>API keys are stored in browser memory only and are automatically cleared when you close the page.</strong></p>
+                    <p>• Never share your API credentials with anyone</p>
+                    <p>• Use API keys with minimal required permissions</p>
+                    <p>• Monitor your account activity regularly</p>
+                    <p>• This application does not store API keys permanently</p>
+                </div>
+                
                 <div class="api-grid">
                     <div class="input-group">
                         <label for="apiKey">API Key</label>
