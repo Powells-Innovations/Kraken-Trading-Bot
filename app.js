@@ -199,9 +199,11 @@ class TradingApp {
         const stats = this.tradingBot.getStats();
         let displayBalance = Number(stats.accountBalance) || 0;
         let balanceLabel = 'Live Account';
+        
         // Add unrealized PnL from open trades
         const unrealized = Number(this.tradingBot.getUnrealizedPnL()) || 0;
         displayBalance = Number(displayBalance) + unrealized;
+        
         // Always use real data - no demo calculations
         document.getElementById('accountBalance').textContent = `£${(displayBalance || 0).toFixed(2)}`;
         document.getElementById('balanceLabel').textContent = balanceLabel;
@@ -209,8 +211,80 @@ class TradingApp {
         document.getElementById('todayPnL').textContent = `£${(Number(stats.todayPnL) || 0).toFixed(2)}`;
         document.getElementById('totalTrades').textContent = stats.totalTrades;
         document.getElementById('winRate').textContent = `${stats.winRate}%`;
+        
         // Debug log the balance update
         this.debugLog(`💳 UI Balance Update: £${(displayBalance || 0).toFixed(2)} (${balanceLabel})`, 'info');
+    }
+
+    /**
+     * Fetch live account balance from Kraken
+     */
+    async fetchLiveBalance() {
+        if (!this.apiKey || !this.apiSecret) {
+            this.debugLog('No API credentials available for live balance fetch', 'warning');
+            return null;
+        }
+
+        try {
+            this.debugLog('Fetching live account balance...', 'api');
+            const balance = await this.krakenAPI.getAccountBalance(this.apiKey, this.apiSecret);
+            
+            if (balance && balance.ZGBP) {
+                const gbpBalance = parseFloat(balance.ZGBP);
+                this.debugLog(`✅ Live balance fetched: £${gbpBalance.toFixed(2)}`, 'success');
+                
+                // Update trading bot account balance
+                this.tradingBot.tradingStats.accountBalance = gbpBalance;
+                
+                // Update UI
+                this.updateStatistics();
+                
+                return gbpBalance;
+            } else {
+                this.debugLog('No GBP balance found in account', 'warning');
+                return 0;
+            }
+        } catch (error) {
+            this.debugLog(`Failed to fetch live balance: ${error.message}`, 'error');
+            return null;
+        }
+    }
+
+    /**
+     * Test API connection with credentials
+     */
+    async testApiConnection() {
+        const apiKey = document.getElementById('apiKey').value.trim();
+        const apiSecret = document.getElementById('apiSecret').value.trim();
+        
+        if (!apiKey || !apiSecret) {
+            this.showNotification('Please enter both API key and secret', 'error');
+            return;
+        }
+
+        try {
+            this.debugLog('Testing API credentials...', 'api');
+            const result = await this.krakenAPI.testCredentials(apiKey, apiSecret);
+            
+            if (result.success) {
+                this.showNotification('✅ API credentials validated successfully', 'success');
+                this.debugLog('✅ API credentials test passed', 'success');
+                
+                // Store credentials for live trading
+                this.apiKey = apiKey;
+                this.apiSecret = apiSecret;
+                
+                // Fetch live balance
+                await this.fetchLiveBalance();
+                
+            } else {
+                this.showNotification(`❌ API credentials test failed: ${result.error}`, 'error');
+                this.debugLog(`❌ API credentials test failed: ${result.error}`, 'error');
+            }
+        } catch (error) {
+            this.showNotification(`❌ API test failed: ${error.message}`, 'error');
+            this.debugLog(`❌ API test failed: ${error.message}`, 'error');
+        }
     }
 
     /**
@@ -997,8 +1071,7 @@ window.toggleMarketType = function() {
 };
 
 window.testApiConnection = function() {
-    app.showNotification('Testing API connection...', 'info');
-    // Add actual API test logic here
+    app.testApiConnection();
 };
 
 window.selectPair = function(symbol) {
