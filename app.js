@@ -15,13 +15,16 @@ class TradingApp {
     constructor() {
         this.krakenAPI = null;
         this.yahooAPI = null;
+        this.coinGeckoAPI = null;
         this.tradingBot = null;
         this.chart = null;
         this.selectedPair = 'BTCGBP';
         this.chartType = 'line';
         this.priceUpdateInterval = null;
         this.stockPriceUpdateInterval = null;
+        this.coinGeckoUpdateInterval = null;
         this.pairData = {};
+        this.coinGeckoData = {};
         this.debugAutoScroll = true;
         this.marketType = 'crypto'; // 'crypto' or 'stocks'
         this.latencyInterval = null;
@@ -45,6 +48,7 @@ class TradingApp {
             // Initialize APIs
             this.krakenAPI = new KrakenAPI();
             this.yahooAPI = new YahooAPI();
+            this.coinGeckoAPI = new CoinGeckoAPI();
             
             // Initialize Trading Bot
             this.tradingBot = new TradingBot();
@@ -70,6 +74,11 @@ class TradingApp {
             
             // Start price updates
             this.startPriceUpdates();
+            
+            // Fetch initial CoinGecko data
+            if (this.coinGeckoAPI.isConnected) {
+                this.fetchInitialCoinGeckoData();
+            }
             
             this.debugLog('✅ Application initialized successfully', 'success');
             
@@ -99,6 +108,16 @@ class TradingApp {
                     this.logMessage('❌ Kraken API connection failed - Cannot fetch real market data', 'error');
                     this.debugLog('❌ Kraken API connection failed - Real market data unavailable', 'error');
                     throw new Error('Kraken API connection failed - Real market data required');
+                }
+                
+                // Also connect to CoinGecko for additional data
+                this.debugLog('🔗 Attempting to connect to CoinGecko API for comprehensive crypto data...', 'connection');
+                const coinGeckoConnected = await this.coinGeckoAPI.connect();
+                if (coinGeckoConnected) {
+                    this.debugLog('✅ Successfully connected to CoinGecko API', 'success');
+                    this.showNotification('Connected to CoinGecko API - Comprehensive crypto data enabled', 'success');
+                } else {
+                    this.debugLog('⚠️ CoinGecko API connection failed - Using Kraken data only', 'warning');
                 }
             } else {
                 this.debugLog('🔗 Attempting to connect to Yahoo Finance API...', 'connection');
@@ -135,6 +154,10 @@ class TradingApp {
         if (this.stockPriceUpdateInterval) {
             clearInterval(this.stockPriceUpdateInterval);
         }
+        if (this.coinGeckoUpdateInterval) {
+            clearInterval(this.coinGeckoUpdateInterval);
+        }
+        
         // Crypto updates every second
         this.priceUpdateInterval = setInterval(async () => {
             try {
@@ -147,6 +170,7 @@ class TradingApp {
                 this.debugLog(`Price update failed: ${error.message}`, 'error');
             }
         }, 1000); // 1 second interval for crypto
+        
         // Stocks update every 60 seconds
         this.stockPriceUpdateInterval = setInterval(async () => {
             try {
@@ -159,7 +183,20 @@ class TradingApp {
                 this.debugLog(`Stock price update failed: ${error.message}`, 'error');
             }
         }, 60000); // 60 seconds interval for stocks
-        this.debugLog('📈 Price updates started: crypto (1s), stocks (60s)', 'info');
+        
+        // CoinGecko data updates every 5 minutes (rate limit consideration)
+        this.coinGeckoUpdateInterval = setInterval(async () => {
+            try {
+                if (this.coinGeckoAPI.isConnected) {
+                    const coinGeckoData = await this.coinGeckoAPI.getAllTradingData();
+                    this.updateCoinGeckoData(coinGeckoData);
+                }
+            } catch (error) {
+                this.debugLog(`CoinGecko update failed: ${error.message}`, 'error');
+            }
+        }, 300000); // 5 minutes interval for CoinGecko
+        
+        this.debugLog('📈 Price updates started: crypto (1s), stocks (60s), CoinGecko (5m)', 'info');
     }
 
     /**
@@ -178,6 +215,47 @@ class TradingApp {
         // Check active trades
         if (this.tradingBot.isTrading) {
             this.tradingBot.checkActiveTrades(tickerData);
+        }
+    }
+
+    /**
+     * Update CoinGecko comprehensive data
+     */
+    updateCoinGeckoData(coinGeckoData) {
+        this.coinGeckoData = coinGeckoData;
+        
+        // Merge CoinGecko data with existing pair data
+        if (coinGeckoData.marketData) {
+            Object.entries(coinGeckoData.marketData).forEach(([pair, data]) => {
+                if (this.pairData[pair]) {
+                    // Merge CoinGecko data with existing Kraken data
+                    this.pairData[pair] = {
+                        ...this.pairData[pair],
+                        ...data
+                    };
+                }
+            });
+        }
+        
+        this.debugLog(`✅ Updated CoinGecko data for ${Object.keys(coinGeckoData.marketData || {}).length} coins`, 'success');
+    }
+
+    /**
+     * Fetch initial CoinGecko data
+     */
+    async fetchInitialCoinGeckoData() {
+        try {
+            this.debugLog('Fetching initial CoinGecko data...', 'api');
+            const coinGeckoData = await this.coinGeckoAPI.getAllTradingData();
+            this.updateCoinGeckoData(coinGeckoData);
+            
+            // Also fetch global market data
+            if (coinGeckoData.globalData) {
+                this.debugLog(`Global Market Cap: £${(coinGeckoData.globalData.total_market_cap / 1000000000).toFixed(1)}B`, 'info');
+                this.debugLog(`24h Volume: £${(coinGeckoData.globalData.total_volume / 1000000000).toFixed(1)}B`, 'info');
+            }
+        } catch (error) {
+            this.debugLog(`Failed to fetch initial CoinGecko data: ${error.message}`, 'error');
         }
     }
 
@@ -388,12 +466,15 @@ class TradingApp {
                 }
             }
             const changeEl = document.getElementById(`change-${type}-${symbol}`);
-            const changePercent = typeof data.changePercent === 'number'
-                ? data.changePercent
-                : (typeof data.change24h === 'number' ? data.change24h : undefined);
+            // Use CoinGecko data if available, fallback to Kraken data
+            const changePercent = typeof data.price_change_percentage_24h === 'number'
+                ? data.price_change_percentage_24h
+                : (typeof data.changePercent === 'number'
+                    ? data.changePercent
+                    : (typeof data.change24h === 'number' ? data.change24h : undefined));
             if (changeEl) {
                 if (typeof changePercent === 'number' && !isNaN(changePercent)) {
-                    changeEl.textContent = `${changePercent.toFixed(2)}%`;
+                    changeEl.textContent = `${changePercent >= 0 ? '+' : ''}${changePercent.toFixed(2)}%`;
                     changeEl.style.color = changePercent >= 0 ? '#00ff88' : '#ff4444';
                 } else {
                     changeEl.textContent = 'N/A';
@@ -401,13 +482,26 @@ class TradingApp {
                 }
             }
             const volumeEl = document.getElementById(`volume-${type}-${symbol}`);
-            const volume = typeof data.volume === 'number' ? data.volume : 0;
+            // Use CoinGecko volume data if available
+            const volume = typeof data.total_volume === 'number' ? data.total_volume : 
+                          (typeof data.volume === 'number' ? data.volume : 0);
             if (volumeEl) {
                 const volumeText = volume > 1000000 ? 
                     (volume / 1000000).toFixed(1) + 'M' : 
                     (volume / 1000).toFixed(0) + 'K';
                 volumeEl.textContent = volumeText;
             }
+            
+            // Add market cap info if available from CoinGecko
+            const marketCapEl = document.getElementById(`market-cap-${type}-${symbol}`);
+            if (marketCapEl && data.market_cap) {
+                const marketCap = data.market_cap;
+                const marketCapText = marketCap > 1000000000 ? 
+                    (marketCap / 1000000000).toFixed(1) + 'B' : 
+                    (marketCap / 1000000).toFixed(1) + 'M';
+                marketCapEl.textContent = `MC: £${marketCapText}`;
+            }
+            
             if (statusEl) {
                 const hasActiveTrade = this.tradingBot.activeTrades[symbol] ? true : false;
                 if (hasActiveTrade) {
