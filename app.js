@@ -11,6 +11,56 @@
  * For licensing inquiries, contact: licensing@tradingbotai.com
  */
 
+// Global legal disclaimer functions
+window.acceptLegalDisclaimer = function() {
+    document.getElementById('legalDisclaimer').style.display = 'none';
+    localStorage.setItem('legalDisclaimerAccepted', 'true');
+    if (window.app) {
+        window.app.debugLog('Legal disclaimer accepted by user', 'info');
+    }
+};
+
+window.rejectLegalDisclaimer = function() {
+    alert('You must accept the legal disclaimer to use this application. The page will now close.');
+    window.close();
+    // Fallback for browsers that don't allow window.close()
+    window.location.href = 'about:blank';
+};
+
+// Check if legal disclaimer has been accepted
+function checkLegalDisclaimer() {
+    const accepted = localStorage.getItem('legalDisclaimerAccepted');
+    if (!accepted) {
+        document.getElementById('legalDisclaimer').style.display = 'flex';
+        return false;
+    }
+    return true;
+}
+
+// Clear API credentials from memory
+function clearApiCredentials() {
+    if (window.app) {
+        window.app.apiKey = null;
+        window.app.apiSecret = null;
+        if (window.app.debugLog) {
+            window.app.debugLog('API credentials cleared from memory', 'info');
+        }
+    }
+}
+
+// Clear API credentials on page unload
+window.addEventListener('beforeunload', function() {
+    clearApiCredentials();
+});
+
+// Clear API credentials on page visibility change (tab switch)
+document.addEventListener('visibilitychange', function() {
+    if (document.visibilityState === 'hidden') {
+        // Optional: clear credentials when tab is not visible
+        // clearApiCredentials();
+    }
+});
+
 class TradingApp {
     constructor() {
         this.krakenAPI = null;
@@ -29,9 +79,19 @@ class TradingApp {
         this.marketType = 'crypto'; // 'crypto' or 'stocks'
         this.latencyInterval = null;
         
+        // API credentials (stored in memory only)
+        this.apiKey = null;
+        this.apiSecret = null;
+
         // Chart state management
         this.timeRange = '15m'; // 15m, 30m, 1h, 3h, 6h, 24h, 1w
-        
+
+        // Check legal disclaimer first
+        if (!checkLegalDisclaimer()) {
+            this.debugLog('Waiting for legal disclaimer acceptance...', 'info');
+            return;
+        }
+
         // Initialize components
         this.initializeComponents();
         // Start latency tester
@@ -44,200 +104,148 @@ class TradingApp {
     async initializeComponents() {
         try {
             this.debugLog('🚀 Initializing Trading Application...', 'info');
-            
+
             // Initialize APIs
             this.krakenAPI = new KrakenAPI();
             this.yahooAPI = new YahooAPI();
             this.coinGeckoAPI = new CoinGeckoAPI();
-            
+
             // Initialize Trading Bot
             this.tradingBot = new TradingBot();
             await this.tradingBot.initialize();
-            
+
             // --- Pre-train neural net with history in background ---
             if (this.tradingBot.pretrainNeuralNetWithHistory) {
                 this.tradingBot.pretrainNeuralNetWithHistory().catch(e => this.debugLog('NN pre-training error: ' + e.message, 'error'));
             }
-            
+
             // Set up UI event listeners
             this.setupEventListeners();
-            
+
             // Initialize chart
             await this.initializeChart();
-            
+
             // Connect to APIs
             await this.connectToAPI();
-            
+
             // Initialize pair cards
             this.initializeCryptoPairCards();
             this.initializeStockPairCards();
-            
+
             // Start price updates
             this.startPriceUpdates();
-            
+
             // Fetch initial CoinGecko data
             if (this.coinGeckoAPI.isConnected) {
                 this.fetchInitialCoinGeckoData();
             }
-            
+
             this.debugLog('✅ Application initialized successfully', 'success');
-            
+
         } catch (error) {
             this.debugLog(`❌ Failed to initialize application: ${error.message}`, 'error');
-            this.showNotification('Failed to initialize application', 'error');
         }
     }
 
     /**
-     * Connect to APIs
+     * Connect to appropriate API based on market type
      */
     async connectToAPI() {
-        try {
-            if (this.marketType === 'crypto') {
-                this.debugLog('🔗 Attempting to connect to Kraken API for real market data...', 'connection');
-                const connected = await this.krakenAPI.connect();
-                if (connected) {
-                    this.updateAPIStatus(true);
-                    this.showNotification('Connected to Kraken API - Real market data enabled', 'success');
-                    this.logMessage('✅ Connected to live Kraken data', 'info');
-                    this.debugLog('✅ Successfully connected to Kraken API - Real market data enabled', 'success');
-                    this.initializeCryptoPairCards();
-                } else {
-                    this.updateAPIStatus(false);
-                    this.showNotification('Failed to connect to Kraken API - No real market data available', 'error');
-                    this.logMessage('❌ Kraken API connection failed - Cannot fetch real market data', 'error');
-                    this.debugLog('❌ Kraken API connection failed - Real market data unavailable', 'error');
-                    throw new Error('Kraken API connection failed - Real market data required');
-                }
-                
-                // Also connect to CoinGecko for additional data
-                this.debugLog('🔗 Attempting to connect to CoinGecko API for comprehensive crypto data...', 'connection');
-                const coinGeckoConnected = await this.coinGeckoAPI.connect();
-                if (coinGeckoConnected) {
-                    this.debugLog('✅ Successfully connected to CoinGecko API', 'success');
-                    this.showNotification('Connected to CoinGecko API - Comprehensive crypto data enabled', 'success');
-                } else {
-                    this.debugLog('⚠️ CoinGecko API connection failed - Using Kraken data only', 'warning');
-                }
+        if (this.marketType === 'crypto') {
+            this.debugLog('🔗 Attempting to connect to Kraken API...', 'info');
+            const connected = await this.krakenAPI.connect();
+            if (connected) {
+                this.updateAPIStatus(true);
+                this.showNotification('Connected to Kraken API', 'success');
+                this.logMessage('✅ Connected to live crypto data', 'info');
+                this.debugLog('✅ Successfully connected to Kraken API', 'success');
+                this.initializeCryptoPairCards();
             } else {
-                this.debugLog('🔗 Attempting to connect to Yahoo Finance API...', 'connection');
-                const connected = await this.yahooAPI.connect();
-                if (connected) {
-                    this.updateAPIStatus(true);
-                    this.showNotification('Connected to Yahoo Finance API', 'success');
-                    this.logMessage('✅ Connected to live stock data', 'info');
-                    this.debugLog('✅ Successfully connected to Yahoo Finance API', 'success');
-                    this.initializeStockPairCards();
-                } else {
-                    this.updateAPIStatus(false);
-                    this.showNotification('Failed to connect to Yahoo Finance API', 'error');
-                    this.logMessage('❌ Yahoo Finance API connection failed', 'error');
-                    this.debugLog('❌ Yahoo Finance API connection failed', 'error');
-                    throw new Error('Yahoo Finance API connection failed');
-                }
+                this.updateAPIStatus(false);
+                this.showNotification('Failed to connect to Kraken API', 'error');
+                this.logMessage('❌ Failed to connect to Kraken API', 'error');
+                this.debugLog('❌ Kraken API connection failed', 'error');
             }
-        } catch (error) {
-            this.updateAPIStatus(false);
-            this.showNotification(`Failed to connect to ${this.marketType} API: ${error.message}`, 'error');
-            this.logMessage(`❌ ${this.marketType} API connection failed: ${error.message}`, 'error');
-            this.debugLog(`❌ API connection failed: ${error.message}`, 'error');
+
+            // Try CoinGecko as backup
+            this.debugLog('🔄 Attempting to connect to CoinGecko API...', 'info');
+            const coinGeckoConnected = await this.coinGeckoAPI.connect();
+            if (coinGeckoConnected) {
+                this.debugLog('✅ Successfully connected to CoinGecko API', 'success');
+            } else {
+                this.debugLog('❌ CoinGecko API connection failed - Using Kraken data only', 'warning');
+            }
+        } else {
+            this.debugLog('🔄 Attempting to connect to Yahoo Finance API...', 'info');
+            const connected = await this.yahooAPI.connect();
+            if (connected) {
+                this.updateAPIStatus(true);
+                this.showNotification('Connected to Yahoo Finance API', 'success');
+                this.logMessage('✅ Connected to live stock data', 'info');
+                this.debugLog('✅ Successfully connected to Yahoo Finance API', 'success');
+                this.initializeStockPairCards();
+            } else {
+                this.updateAPIStatus(false);
+                this.showNotification('Failed to connect to Yahoo Finance API', 'error');
+                this.logMessage('❌ Failed to connect to Yahoo Finance API', 'error');
+                this.debugLog('❌ Yahoo Finance API connection failed', 'error');
+            }
         }
     }
 
     /**
-     * Start real-time price updates
+     * Start price updates
      */
     startPriceUpdates() {
-        if (this.priceUpdateInterval) {
-            clearInterval(this.priceUpdateInterval);
-        }
-        if (this.stockPriceUpdateInterval) {
-            clearInterval(this.stockPriceUpdateInterval);
-        }
-        if (this.coinGeckoUpdateInterval) {
-            clearInterval(this.coinGeckoUpdateInterval);
-        }
-        
-        // Crypto updates every second
-        this.priceUpdateInterval = setInterval(async () => {
-            try {
-                if (this.krakenAPI.isConnected) {
+        if (this.priceUpdateInterval) clearInterval(this.priceUpdateInterval);
+        if (this.stockPriceUpdateInterval) clearInterval(this.stockPriceUpdateInterval);
+        if (this.coinGeckoUpdateInterval) clearInterval(this.coinGeckoUpdateInterval);
+
+        if (this.marketType === 'crypto') {
+            // Update crypto prices every 5 seconds
+            this.priceUpdateInterval = setInterval(async () => {
+                try {
                     const tickerData = await this.krakenAPI.getTickerData();
-                    this.updatePairData(tickerData);
+                    this.pairData = { ...this.pairData, ...tickerData };
+                    this.updateCryptoPairCards();
+                    this.updateActiveTrades();
+                    this.updateStatistics();
+                    
+                    // Update trading bot with new data
+                    if (this.tradingBot && this.tradingBot.isTrading) {
+                        await this.tradingBot.checkActiveTrades(tickerData);
+                    }
+                } catch (error) {
+                    this.debugLog(`Price update failed: ${error.message}`, 'error');
                 }
-                this.updateUI();
-            } catch (error) {
-                this.debugLog(`Price update failed: ${error.message}`, 'error');
-            }
-        }, 1000); // 1 second interval for crypto
-        
-        // Stocks update every 60 seconds
-        this.stockPriceUpdateInterval = setInterval(async () => {
-            try {
-                if (this.yahooAPI.isConnected) {
-                    const stockData = await this.yahooAPI.getStockData();
-                    this.updatePairData(stockData);
-                }
-                this.updateUI();
-            } catch (error) {
-                this.debugLog(`Stock price update failed: ${error.message}`, 'error');
-            }
-        }, 60000); // 60 seconds interval for stocks
-        
-        // CoinGecko data updates every 5 minutes (rate limit consideration)
-        this.coinGeckoUpdateInterval = setInterval(async () => {
-            try {
+            }, 5000);
+
+            // Update CoinGecko data every 30 seconds
+            this.coinGeckoUpdateInterval = setInterval(async () => {
                 if (this.coinGeckoAPI.isConnected) {
-                    const coinGeckoData = await this.coinGeckoAPI.getAllTradingData();
-                    this.updateCoinGeckoData(coinGeckoData);
+                    try {
+                        const coinGeckoData = await this.coinGeckoAPI.getMarketData();
+                        this.coinGeckoData = coinGeckoData;
+                        this.updateCryptoPairCards(); // Refresh with CoinGecko data
+                    } catch (error) {
+                        this.debugLog(`CoinGecko update failed: ${error.message}`, 'error');
+                    }
                 }
-            } catch (error) {
-                this.debugLog(`CoinGecko update failed: ${error.message}`, 'error');
-            }
-        }, 300000); // 5 minutes interval for CoinGecko
-        
-        this.debugLog('📈 Price updates started: crypto (1s), stocks (60s), CoinGecko (5m)', 'info');
-    }
-
-    /**
-     * Update pair data with new market data
-     */
-    updatePairData(tickerData) {
-        this.pairData = tickerData;
-        
-        // Update trading bot chart data
-        Object.entries(tickerData).forEach(([symbol, data]) => {
-            const price = data.price || data.c;
-            const timestamp = data.lastUpdate || data.timestamp;
-            this.tradingBot.updateChartData(symbol, price, timestamp);
-        });
-        
-        // Check active trades
-        if (this.tradingBot.isTrading) {
-            this.tradingBot.checkActiveTrades(tickerData);
-        }
-    }
-
-    /**
-     * Update CoinGecko comprehensive data
-     */
-    updateCoinGeckoData(coinGeckoData) {
-        this.coinGeckoData = coinGeckoData;
-        
-        // Merge CoinGecko data with existing pair data
-        if (coinGeckoData.marketData) {
-            Object.entries(coinGeckoData.marketData).forEach(([pair, data]) => {
-                if (this.pairData[pair]) {
-                    // Merge CoinGecko data with existing Kraken data
-                    this.pairData[pair] = {
-                        ...this.pairData[pair],
-                        ...data
-                    };
+            }, 30000);
+        } else {
+            // Update stock prices every 10 seconds
+            this.stockPriceUpdateInterval = setInterval(async () => {
+                try {
+                    const stockData = await this.yahooAPI.getStockData();
+                    this.pairData = { ...this.pairData, ...stockData };
+                    this.updateStockPairCards();
+                    this.updateActiveTrades();
+                    this.updateStatistics();
+                } catch (error) {
+                    this.debugLog(`Stock price update failed: ${error.message}`, 'error');
                 }
-            });
+            }, 10000);
         }
-        
-        this.debugLog(`✅ Updated CoinGecko data for ${Object.keys(coinGeckoData.marketData || {}).length} coins`, 'success');
     }
 
     /**
@@ -245,123 +253,11 @@ class TradingApp {
      */
     async fetchInitialCoinGeckoData() {
         try {
-            this.debugLog('Fetching initial CoinGecko data...', 'api');
-            const coinGeckoData = await this.coinGeckoAPI.getAllTradingData();
-            this.updateCoinGeckoData(coinGeckoData);
-            
-            // Also fetch global market data
-            if (coinGeckoData.globalData) {
-                this.debugLog(`Global Market Cap: £${(coinGeckoData.globalData.total_market_cap / 1000000000).toFixed(1)}B`, 'info');
-                this.debugLog(`24h Volume: £${(coinGeckoData.globalData.total_volume / 1000000000).toFixed(1)}B`, 'info');
-            }
+            const coinGeckoData = await this.coinGeckoAPI.getMarketData();
+            this.coinGeckoData = coinGeckoData;
+            this.updateCryptoPairCards();
         } catch (error) {
-            this.debugLog(`Failed to fetch initial CoinGecko data: ${error.message}`, 'error');
-        }
-    }
-
-    /**
-     * Update all UI elements
-     */
-    updateUI() {
-        this.updateStatistics();
-        this.updateCryptoPairCards();
-        this.updateStockPairCards();
-        this.updateActiveTrades();
-        this.updateChart();
-    }
-
-    /**
-     * Update trading statistics
-     */
-    updateStatistics() {
-        const stats = this.tradingBot.getStats();
-        let displayBalance = Number(stats.accountBalance) || 0;
-        let balanceLabel = 'Live Account';
-        
-        // Add unrealized PnL from open trades
-        const unrealized = Number(this.tradingBot.getUnrealizedPnL()) || 0;
-        displayBalance = Number(displayBalance) + unrealized;
-        
-        // Always use real data - no demo calculations
-        document.getElementById('accountBalance').textContent = `£${(displayBalance || 0).toFixed(2)}`;
-        document.getElementById('balanceLabel').textContent = balanceLabel;
-        document.getElementById('totalPnL').textContent = `£${((Number(stats.totalPnL) || 0) + unrealized).toFixed(2)}`;
-        document.getElementById('todayPnL').textContent = `£${(Number(stats.todayPnL) || 0).toFixed(2)}`;
-        document.getElementById('totalTrades').textContent = stats.totalTrades;
-        document.getElementById('winRate').textContent = `${stats.winRate}%`;
-        
-        // Debug log the balance update
-        this.debugLog(`💳 UI Balance Update: £${(displayBalance || 0).toFixed(2)} (${balanceLabel})`, 'info');
-    }
-
-    /**
-     * Fetch live account balance from Kraken
-     */
-    async fetchLiveBalance() {
-        if (!this.apiKey || !this.apiSecret) {
-            this.debugLog('No API credentials available for live balance fetch', 'warning');
-            return null;
-        }
-
-        try {
-            this.debugLog('Fetching live account balance...', 'api');
-            const balance = await this.krakenAPI.getAccountBalance(this.apiKey, this.apiSecret);
-            
-            if (balance && balance.ZGBP) {
-                const gbpBalance = parseFloat(balance.ZGBP);
-                this.debugLog(`✅ Live balance fetched: £${gbpBalance.toFixed(2)}`, 'success');
-                
-                // Update trading bot account balance
-                this.tradingBot.tradingStats.accountBalance = gbpBalance;
-                
-                // Update UI
-                this.updateStatistics();
-                
-                return gbpBalance;
-            } else {
-                this.debugLog('No GBP balance found in account', 'warning');
-                return 0;
-            }
-        } catch (error) {
-            this.debugLog(`Failed to fetch live balance: ${error.message}`, 'error');
-            return null;
-        }
-    }
-
-    /**
-     * Test API connection with credentials
-     */
-    async testApiConnection() {
-        const apiKey = document.getElementById('apiKey').value.trim();
-        const apiSecret = document.getElementById('apiSecret').value.trim();
-        
-        if (!apiKey || !apiSecret) {
-            this.showNotification('Please enter both API key and secret', 'error');
-            return;
-        }
-
-        try {
-            this.debugLog('Testing API credentials...', 'api');
-            const result = await this.krakenAPI.testCredentials(apiKey, apiSecret);
-            
-            if (result.success) {
-                this.showNotification('✅ API credentials validated successfully', 'success');
-                this.debugLog('✅ API credentials test passed', 'success');
-                
-                // Store credentials for live trading
-                this.apiKey = apiKey;
-                this.apiSecret = apiSecret;
-                
-                // Fetch live balance
-                await this.fetchLiveBalance();
-                
-            } else {
-                this.showNotification(`❌ API credentials test failed: ${result.error}`, 'error');
-                this.debugLog(`❌ API credentials test failed: ${result.error}`, 'error');
-            }
-        } catch (error) {
-            this.showNotification(`❌ API test failed: ${error.message}`, 'error');
-            this.debugLog(`❌ API test failed: ${error.message}`, 'error');
+            this.debugLog(`Initial CoinGecko data fetch failed: ${error.message}`, 'error');
         }
     }
 
@@ -371,11 +267,40 @@ class TradingApp {
     initializeCryptoPairCards() {
         const container = document.getElementById('cryptoPairsGrid');
         if (!container) return;
-        container.innerHTML = '';
-        Object.keys(this.krakenAPI.pairs).forEach(pair => {
-            const card = this.createPairCard(pair, 'crypto');
-            container.appendChild(card);
-        });
+
+        container.innerHTML = Object.keys(this.krakenAPI.pairs).map(symbol => {
+            const pairName = this.krakenAPI.pairNames[symbol];
+            return `
+                <div class="pair-card" id="pair-${symbol}">
+                    <div class="pair-header">
+                        <h4>${pairName}</h4>
+                        <span class="pair-status status-inactive" id="status-${symbol}">Inactive</span>
+                    </div>
+                    <div class="pair-metrics">
+                        <div class="metric">
+                            <div class="metric-value" id="price-${symbol}">£0.0000</div>
+                            <div class="metric-label">Price</div>
+                        </div>
+                        <div class="metric">
+                            <div class="metric-value" id="change-${symbol}">0.00%</div>
+                            <div class="metric-label">24h Change</div>
+                        </div>
+                        <div class="metric">
+                            <div class="metric-value" id="volume-${symbol}">0K</div>
+                            <div class="metric-label">Volume</div>
+                        </div>
+                        <div class="metric">
+                            <div class="metric-value" id="market-cap-${symbol}">--</div>
+                            <div class="metric-label">Market Cap</div>
+                        </div>
+                    </div>
+                    <div class="pair-pnl" id="pnl-${symbol}">
+                        <div class="pnl-value">£0.00</div>
+                        <div class="metric-label">P&L</div>
+                    </div>
+                </div>
+            `;
+        }).join('');
     }
 
     /**
@@ -384,58 +309,36 @@ class TradingApp {
     initializeStockPairCards() {
         const container = document.getElementById('stockPairsGrid');
         if (!container) return;
-        container.innerHTML = '';
-        Object.keys(this.yahooAPI.stocks).forEach(stock => {
-            const card = this.createPairCard(stock, 'stock');
-            container.appendChild(card);
-        });
-    }
 
-    /**
-     * Create a trading pair card (crypto or stock)
-     */
-    createPairCard(symbol, type = 'crypto') {
-        const card = document.createElement('div');
-        card.className = 'pair-card';
-        card.id = `${type}-pair-${symbol}`;
-        let symbolName, changeLabel, currency;
-        if (type === 'crypto') {
-            symbolName = this.krakenAPI.pairNames[symbol];
-            changeLabel = '24h Change';
-            currency = '£';
-        } else {
-            symbolName = this.yahooAPI.stockNames[symbol];
-            changeLabel = '24h Change';
-            currency = '$';
-        }
-        card.innerHTML = `
-            <div class="pair-header">
-                <div>
-                    <div class="pair-name">${symbolName}</div>
-                    <div class="pair-price" id="price-${type}-${symbol}">Loading...</div>
+        container.innerHTML = Object.keys(this.yahooAPI.stocks).map(symbol => {
+            const stockName = this.yahooAPI.stockNames[symbol];
+            return `
+                <div class="pair-card" id="pair-${symbol}">
+                    <div class="pair-header">
+                        <h4>${stockName}</h4>
+                        <span class="pair-status status-inactive" id="status-${symbol}">Inactive</span>
+                    </div>
+                    <div class="pair-metrics">
+                        <div class="metric">
+                            <div class="metric-value" id="price-${symbol}">$0.00</div>
+                            <div class="metric-label">Price</div>
+                        </div>
+                        <div class="metric">
+                            <div class="metric-value" id="change-${symbol}">0.00%</div>
+                            <div class="metric-label">Change</div>
+                        </div>
+                        <div class="metric">
+                            <div class="metric-value" id="volume-${symbol}">0K</div>
+                            <div class="metric-label">Volume</div>
+                        </div>
+                    </div>
+                    <div class="pair-pnl" id="pnl-${symbol}">
+                        <div class="pnl-value">$0.00</div>
+                        <div class="metric-label">P&L</div>
+                    </div>
                 </div>
-                <div class="pair-status status-inactive" id="status-${type}-${symbol}">Inactive</div>
-            </div>
-            <div class="pair-metrics">
-                <div class="metric">
-                    <div class="metric-value" id="change-${type}-${symbol}">0.00%</div>
-                    <div class="metric-label">${changeLabel}</div>
-                </div>
-                <div class="metric">
-                    <div class="metric-value" id="volume-${type}-${symbol}">0</div>
-                    <div class="metric-label">Volume</div>
-                </div>
-                <div class="metric">
-                    <div class="metric-value" id="trades-${type}-${symbol}">0</div>
-                    <div class="metric-label">Trades</div>
-                </div>
-                <div class="metric">
-                    <div class="metric-value" id="pnl-${type}-${symbol}">${currency}0.00</div>
-                    <div class="metric-label">P&L</div>
-                </div>
-            </div>
-        `;
-        return card;
+            `;
+        }).join('');
     }
 
     /**
@@ -483,25 +386,25 @@ class TradingApp {
             }
             const volumeEl = document.getElementById(`volume-${type}-${symbol}`);
             // Use CoinGecko volume data if available
-            const volume = typeof data.total_volume === 'number' ? data.total_volume : 
+            const volume = typeof data.total_volume === 'number' ? data.total_volume :
                           (typeof data.volume === 'number' ? data.volume : 0);
             if (volumeEl) {
-                const volumeText = volume > 1000000 ? 
-                    (volume / 1000000).toFixed(1) + 'M' : 
+                const volumeText = volume > 1000000 ?
+                    (volume / 1000000).toFixed(1) + 'M' :
                     (volume / 1000).toFixed(0) + 'K';
                 volumeEl.textContent = volumeText;
             }
-            
+
             // Add market cap info if available from CoinGecko
             const marketCapEl = document.getElementById(`market-cap-${type}-${symbol}`);
             if (marketCapEl && data.market_cap) {
                 const marketCap = data.market_cap;
-                const marketCapText = marketCap > 1000000000 ? 
-                    (marketCap / 1000000000).toFixed(1) + 'B' : 
+                const marketCapText = marketCap > 1000000000 ?
+                    (marketCap / 1000000000).toFixed(1) + 'B' :
                     (marketCap / 1000000).toFixed(1) + 'M';
                 marketCapEl.textContent = `MC: £${marketCapText}`;
             }
-            
+
             if (statusEl) {
                 const hasActiveTrade = this.tradingBot.activeTrades[symbol] ? true : false;
                 if (hasActiveTrade) {
@@ -561,8 +464,8 @@ class TradingApp {
             const volumeEl = document.getElementById(`volume-${type}-${symbol}`);
             const volume = typeof data.volume === 'number' ? data.volume : 0;
             if (volumeEl) {
-                const volumeText = volume > 1000000 ? 
-                    (volume / 1000000).toFixed(1) + 'M' : 
+                const volumeText = volume > 1000000 ?
+                    (volume / 1000000).toFixed(1) + 'M' :
                     (volume / 1000).toFixed(0) + 'K';
                 volumeEl.textContent = volumeText;
             }
@@ -589,25 +492,25 @@ class TradingApp {
         const container = document.getElementById('activeTradesList');
         const activeTrades = this.tradingBot.getActiveTrades();
         const activeTradeKeys = Object.keys(activeTrades);
-        
+
         if (activeTradeKeys.length === 0) {
             container.innerHTML = '<div class="empty-state">No active trades</div>';
             return;
         }
-        
+
         container.innerHTML = activeTradeKeys.map(tradeKey => {
             const trade = activeTrades[tradeKey];
             const actualPair = trade.pair; // Get the actual pair name from the trade object
             const currentPrice = this.pairData[actualPair]?.price || 0;
             const unrealizedPnL = trade.unrealizedPnL || 0;
             const duration = Math.floor((Date.now() - trade.timestamp) / 1000);
-            const priceChange = trade.side === 'BUY' 
+            const priceChange = trade.side === 'BUY'
                 ? ((currentPrice - trade.entryPrice) / trade.entryPrice) * 100
                 : ((trade.entryPrice - currentPrice) / trade.entryPrice) * 100;
-            
+
             const modeIcon = trade.mode === 'live' ? '💰' : '📊';
             const pairDisplayName = this.krakenAPI.pairNames[actualPair] || actualPair;
-            
+
             return `
                 <div class="trade-item">
                     <div class="trade-info">
@@ -637,16 +540,16 @@ class TradingApp {
     updateChart() {
         const chartDiv = document.getElementById('priceChart');
         if (!chartDiv) return;
-        
+
         let data;
         if (this.chartType === 'candlestick') {
             data = this.tradingBot.getChartData(this.selectedPair, 'candlestick');
         } else {
             data = this.tradingBot.getChartData(this.selectedPair, 'line');
         }
-        
+
         if (!Array.isArray(data)) data = [];
-        
+
         // Filter data based on time range
         const now = Date.now();
         let rangeMs = 40 * 60 * 1000; // Show last 40 minutes/candles by default
@@ -656,9 +559,9 @@ class TradingApp {
         else if (this.timeRange === '6h') rangeMs = 6 * 60 * 60 * 1000;
         else if (this.timeRange === '24h') rangeMs = 24 * 60 * 60 * 1000;
         else if (this.timeRange === '1w') rangeMs = 7 * 24 * 60 * 60 * 1000;
-        
+
         data = data.filter(d => d && d.time && (typeof d.time === 'number') && (d.time * 1000) >= (now - rangeMs) && (d.time * 1000) <= now);
-        
+
         if (!data.length) {
             chartDiv.innerHTML = '<div style="color:#f66;text-align:center;padding:1em;">No data available</div>';
             return;
@@ -791,15 +694,15 @@ class TradingApp {
         document.getElementById('maxInvestment').addEventListener('change', (e) => {
             this.tradingBot.updateSettings({ maxInvestment: parseFloat(e.target.value) });
         });
-        
+
         document.getElementById('takeProfit').addEventListener('change', (e) => {
             this.tradingBot.updateSettings({ takeProfit: parseFloat(e.target.value) });
         });
-        
+
         document.getElementById('stopLoss').addEventListener('change', (e) => {
             this.tradingBot.updateSettings({ stopLoss: parseFloat(e.target.value) });
         });
-        
+
         document.getElementById('tradeFrequency').addEventListener('change', (e) => {
             this.tradingBot.updateSettings({ tradeFrequency: e.target.value });
         });
@@ -816,32 +719,32 @@ class TradingApp {
     toggleMarketType() {
         const marketTypeSelect = document.getElementById('marketType');
         const newMarketType = marketTypeSelect.value;
-        
+
         if (this.marketType !== newMarketType) {
             this.marketType = newMarketType;
             this.tradingBot.setMarketType(newMarketType);
-            
+
             // Stop current trading if active
             if (this.tradingBot.isTrading) {
                 this.tradingBot.stopTrading();
                 this.updateTradingStatus(false);
             }
-            
+
             // Reconnect to the appropriate API
             this.connectToAPI().then(() => {
                 // Reinitialize pair cards
                 this.initializeCryptoPairCards();
                 this.initializeStockPairCards();
-                
+
                 // Update chart controls
                 this.updateChartControls();
-                
+
                 // Restart price updates
                 this.startPriceUpdates();
-                
+
                 // Restart latency tester
                 this.startLatencyTester();
-                
+
                 this.showNotification(`Switched to ${newMarketType} market`, 'success');
                 this.logMessage(`🔄 Switched to ${newMarketType} market`, 'info');
             });
@@ -886,7 +789,7 @@ class TradingApp {
     updateAPIStatus(connected) {
         const statusEl = document.getElementById('apiStatus');
         const statusTextEl = document.getElementById('apiStatusText');
-        
+
         if (connected) {
             statusEl.classList.add('connected');
             statusTextEl.textContent = 'Connected';
@@ -902,7 +805,7 @@ class TradingApp {
     updateTradingStatus(trading) {
         const statusEl = document.getElementById('tradingStatus');
         const statusTextEl = document.getElementById('tradingStatusText');
-        
+
         if (trading) {
             statusEl.classList.add('trading');
             statusTextEl.textContent = 'Trading';
@@ -920,7 +823,7 @@ class TradingApp {
         notification.textContent = message;
         notification.className = `notification ${type}`;
         notification.style.display = 'block';
-        
+
         setTimeout(() => {
             notification.style.display = 'none';
         }, type === 'error' ? 5000 : 3000);
@@ -931,15 +834,15 @@ class TradingApp {
      */
     addLogEntry(entry) {
         const logContainer = document.getElementById('tradingLog');
-        const timestamp = entry.timestamp.toLocaleTimeString('en-GB', { 
-            hour12: false, 
-            hour: '2-digit', 
-            minute: '2-digit' 
+        const timestamp = entry.timestamp.toLocaleTimeString('en-GB', {
+            hour12: false,
+            hour: '2-digit',
+            minute: '2-digit'
         });
         
         let message = '';
         let logClass = 'log-info';
-        
+
         if (entry.type === 'trade') {
             const modeIcon = entry.mode === 'live' ? '💰' : '📊';
             const sideIcon = entry.side === 'BUY' ? '📈' : '📉';
@@ -947,26 +850,26 @@ class TradingApp {
             logClass = entry.side === 'BUY' ? 'log-buy' : 'log-sell';
         } else if (entry.type === 'closure') {
             const modeIcon = entry.mode === 'live' ? '💰' : '📊';
-            const pnlIcon = entry.pnl >= 0 ? '💰' : '📉';
+            const pnlIcon = entry.pnl >= 0 ? '📈' : '📉';
             message = `${modeIcon} ${pnlIcon} CLOSE ${this.krakenAPI.pairNames[entry.pair]}: ${entry.pnl >= 0 ? '+' : ''}£${entry.pnl.toFixed(2)} ${entry.reason} at £${entry.price.toFixed(4)}`;
             logClass = entry.pnl >= 0 ? 'log-buy' : 'log-sell';
         }
-        
+
         const logEntry = document.createElement('div');
         logEntry.className = `log-entry ${logClass}`;
         logEntry.innerHTML = `
             <span class="log-timestamp">${timestamp}</span>
             <span>${message}</span>
         `;
-        
+
         logContainer.appendChild(logEntry);
         logContainer.scrollTop = logContainer.scrollHeight;
-        
+
         // Keep only last 50 entries
         while (logContainer.children.length > 50) {
             logContainer.removeChild(logContainer.firstChild);
         }
-        
+
         // Also log to debug console
         this.debugLog(`[LOG] ${message}`, 'info');
     }
@@ -976,19 +879,19 @@ class TradingApp {
      */
     logMessage(message, type = 'info') {
         const logContainer = document.getElementById('tradingLog');
-        const timestamp = new Date().toLocaleTimeString('en-GB', { 
-            hour12: false, 
-            hour: '2-digit', 
-            minute: '2-digit' 
+        const timestamp = new Date().toLocaleTimeString('en-GB', {
+            hour12: false,
+            hour: '2-digit',
+            minute: '2-digit'
         });
-        
+
         const logEntry = document.createElement('div');
         logEntry.className = `log-entry log-${type}`;
         logEntry.innerHTML = `
             <span class="log-timestamp">${timestamp}</span>
             <span>${message}</span>
         `;
-        
+
         logContainer.appendChild(logEntry);
         logContainer.scrollTop = logContainer.scrollHeight;
     }
@@ -998,31 +901,31 @@ class TradingApp {
      */
     debugLog(message, type = 'info') {
         const debugContainer = document.getElementById('debugLog');
-        const timestamp = new Date().toLocaleTimeString('en-GB', { 
-            hour12: false, 
-            hour: '2-digit', 
-            minute: '2-digit', 
-            second: '2-digit' 
+        const timestamp = new Date().toLocaleTimeString('en-GB', {
+            hour12: false,
+            hour: '2-digit',
+            minute: '2-digit',
+            second: '2-digit'
         });
-        
+
         const debugEntry = document.createElement('div');
         debugEntry.className = 'debug-entry';
         debugEntry.innerHTML = `
             <span class="debug-timestamp">${timestamp}</span>
             <span class="debug-message debug-${type}">${message}</span>
         `;
-        
+
         debugContainer.appendChild(debugEntry);
-        
+
         if (this.debugAutoScroll) {
             debugContainer.scrollTop = debugContainer.scrollHeight;
         }
-        
+
         // Keep only last 100 entries
         while (debugContainer.children.length > 100) {
             debugContainer.removeChild(debugContainer.firstChild);
         }
-        
+
         // Also log to console
         console.log(`[DEBUG] ${message}`);
     }
@@ -1072,104 +975,208 @@ class TradingApp {
     startLatencyTester() {
         if (this.latencyInterval) clearInterval(this.latencyInterval);
         const latencyEl = document.getElementById('latencyStatus');
-        
+
         const pingKraken = async () => {
             const start = performance.now();
             try {
                 // Fetch real market data from Kraken
-                const response = await fetch('https://api.kraken.com/0/public/Ticker?pair=BTCGBP', { 
-                    method: 'GET', 
-                    cache: 'no-store' 
+                const response = await fetch('https://api.kraken.com/0/public/Ticker?pair=BTCGBP', {
+                    method: 'GET',
+                    cache: 'no-store'
                 });
                 const data = await response.json();
                 const latency = Math.round(performance.now() - start);
                 latencyEl.textContent = `${latency} ms`;
-                this.debugLog(`🌐 Kraken API latency: ${latency}ms`, 'info');
+                this.debugLog(`🌐 Latency test: ${latency}ms`, 'info');
             } catch (error) {
                 latencyEl.textContent = '-- ms';
-                this.debugLog(`❌ Kraken API latency test failed: ${error.message}`, 'error');
+                this.debugLog(`Latency test failed: ${error.message}`, 'error');
             }
         };
-                pingKraken();
-        this.latencyInterval = setInterval(pingKraken, 60000); // 1 minute interval
+
+        pingKraken();
+        this.latencyInterval = setInterval(pingKraken, 30000); // Test every 30 seconds
     }
 
-    // Restore and fix setTimeRange so the time range buttons work
-    setTimeRange(range) {
-        this.timeRange = range;
-        // Update active button
-        const buttons = document.querySelectorAll('.time-btn');
-        buttons.forEach(btn => btn.classList.remove('active'));
-        buttons.forEach(btn => {
-            if (btn.textContent.replace(/\s/g, '') === range.replace(/\s/g, '')) {
-                btn.classList.add('active');
+    /**
+     * Update statistics display
+     */
+    updateStatistics() {
+        if (!this.tradingBot) return;
+
+        const stats = this.tradingBot.getStats();
+        
+        // Update balance
+        const balanceEl = document.getElementById('accountBalance');
+        if (balanceEl) {
+            balanceEl.textContent = `£${stats.accountBalance.toFixed(2)}`;
+        }
+
+        // Update P&L
+        const totalPnLEl = document.getElementById('totalPnL');
+        if (totalPnLEl) {
+            totalPnLEl.textContent = `£${stats.totalPnL.toFixed(2)}`;
+            totalPnLEl.style.color = stats.totalPnL >= 0 ? '#00ff88' : '#ff4444';
+        }
+
+        const todayPnLEl = document.getElementById('todayPnL');
+        if (todayPnLEl) {
+            todayPnLEl.textContent = `£${stats.todayPnL.toFixed(2)}`;
+            todayPnLEl.style.color = stats.todayPnL >= 0 ? '#00ff88' : '#ff4444';
+        }
+
+        // Update trade count
+        const totalTradesEl = document.getElementById('totalTrades');
+        if (totalTradesEl) {
+            totalTradesEl.textContent = stats.totalTrades;
+        }
+
+        // Update win rate
+        const winRateEl = document.getElementById('winRate');
+        if (winRateEl) {
+            winRateEl.textContent = `${stats.winRate}%`;
+        }
+    }
+
+    /**
+     * Get account balance (for live trading)
+     */
+    async getAccountBalance() {
+        try {
+            if (!this.apiKey || !this.apiSecret) {
+                throw new Error('API credentials required for account balance');
             }
-        });
-        this.updateChart();
-        this.debugLog(`Time range set to: ${range}`, 'info');
+
+            const balance = await this.krakenAPI.getAccountBalance(this.apiKey, this.apiSecret);
+            
+            // Update balance display
+            const balanceEl = document.getElementById('accountBalance');
+            if (balanceEl && balance.ZGBP) {
+                balanceEl.textContent = `£${parseFloat(balance.ZGBP).toFixed(2)}`;
+            }
+
+            this.debugLog('Account balance updated', 'success');
+            return balance;
+        } catch (error) {
+            this.debugLog(`Failed to get account balance: ${error.message}`, 'error');
+            throw error;
+        }
+    }
+
+    /**
+     * Test API connection
+     */
+    async testApiConnection() {
+        try {
+            const apiKey = document.getElementById('apiKey').value.trim();
+            const apiSecret = document.getElementById('apiSecret').value.trim();
+
+            if (!apiKey || !apiSecret) {
+                this.showNotification('Please enter both API key and secret', 'error');
+                return;
+            }
+
+            this.debugLog('Testing API credentials...', 'info');
+            const result = await this.krakenAPI.testCredentials(apiKey, apiSecret);
+
+            if (result.success) {
+                this.showNotification('API credentials validated successfully', 'success');
+                this.logMessage('✅ API credentials validated', 'success');
+                
+                // Store credentials in memory (not persistent)
+                this.apiKey = apiKey;
+                this.apiSecret = apiSecret;
+                
+                // Update balance
+                await this.getAccountBalance();
+                
+                this.debugLog('API credentials stored in memory (session only)', 'info');
+            } else {
+                this.showNotification(`API test failed: ${result.error}`, 'error');
+                this.logMessage(`❌ API test failed: ${result.error}`, 'error');
+            }
+        } catch (error) {
+            this.showNotification(`API test failed: ${error.message}`, 'error');
+            this.logMessage(`❌ API test failed: ${error.message}`, 'error');
+            this.debugLog(`API test error: ${error.message}`, 'error');
+        }
     }
 }
 
-// Global functions for HTML onclick handlers
+// Global functions for UI interactions
 window.startTrading = function() {
-    if (app.tradingBot.startTrading()) {
-        app.updateTradingStatus(true);
-        document.getElementById('startBtn').disabled = true;
-        document.getElementById('stopBtn').disabled = false;
-        app.showNotification('Trading started', 'success');
+    if (window.app && window.app.tradingBot) {
+        window.app.tradingBot.startTrading().then(success => {
+            if (success) {
+                window.app.updateTradingStatus(true);
+                window.app.showNotification('Trading started', 'success');
+                document.getElementById('startBtn').disabled = true;
+                document.getElementById('stopBtn').disabled = false;
+            } else {
+                window.app.showNotification('Failed to start trading', 'error');
+            }
+        });
     }
 };
 
 window.stopTrading = function() {
-    app.tradingBot.stopTrading();
-    app.updateTradingStatus(false);
-    document.getElementById('startBtn').disabled = false;
-    document.getElementById('stopBtn').disabled = true;
-    app.showNotification('Trading stopped', 'warning');
+    if (window.app && window.app.tradingBot) {
+        window.app.tradingBot.stopTrading();
+        window.app.updateTradingStatus(false);
+        window.app.showNotification('Trading stopped', 'info');
+        document.getElementById('startBtn').disabled = false;
+        document.getElementById('stopBtn').disabled = true;
+    }
 };
 
 window.refreshData = function() {
-    app.connectToAPI();
-    app.showNotification('Refreshing data...', 'info');
+    if (window.app) {
+        window.app.connectToAPI();
+        window.app.showNotification('Data refreshed', 'info');
+    }
+};
+
+window.reloadHistoricalData = function() {
+    if (window.app && window.app.tradingBot) {
+        window.app.tradingBot.reloadAllHistoricalData();
+        window.app.showNotification('Historical data reloaded', 'info');
+    }
 };
 
 window.setManualStopLoss = function() {
-    app.showNotification('Manual stop loss feature coming soon', 'info');
+    if (window.app && window.app.tradingBot) {
+        // Implementation for manual stop loss
+        window.app.showNotification('Manual stop loss feature coming soon', 'info');
+    }
 };
 
-window.reloadHistoricalData = async function() {
-    if (app.tradingBot) {
-        app.showNotification('Reloading historical data for all pairs...', 'info');
-        await app.tradingBot.reloadAllHistoricalData();
-        app.showNotification('Historical data reload complete!', 'success');
-    } else {
-        app.showNotification('Trading bot not initialized', 'error');
+window.toggleMarketType = function() {
+    if (window.app) {
+        window.app.toggleMarketType();
     }
 };
 
 window.toggleTradingMode = function() {
-    const mode = document.getElementById('tradingMode').value;
-    app.tradingBot.setTradingMode(mode);
+    const modeSelect = document.getElementById('tradingMode');
+    const apiSection = document.getElementById('apiSection');
     
-    if (mode === 'live') {
-        document.getElementById('apiSection').style.display = 'block';
+    if (modeSelect.value === 'live') {
+        apiSection.style.display = 'block';
     } else {
-        document.getElementById('apiSection').style.display = 'none';
+        apiSection.style.display = 'none';
+        // Clear API credentials when switching to demo mode
+        if (window.app) {
+            window.app.apiKey = null;
+            window.app.apiSecret = null;
+            window.app.debugLog('API credentials cleared (switched to demo mode)', 'info');
+        }
     }
-    
-    app.showNotification(`Trading mode set to: ${mode}`, 'info');
-};
-
-window.toggleMarketType = function() {
-    app.toggleMarketType();
-};
-
-window.testApiConnection = function() {
-    app.testApiConnection();
 };
 
 window.selectPair = function(symbol) {
-    app.selectPair(symbol);
+    if (window.app) {
+        window.app.selectPair(symbol);
+    }
 };
 
 window.setChartType = function(type) {
@@ -1180,20 +1187,24 @@ window.setChartType = function(type) {
 
 window.setTimeRange = function(range) {
     if (window.app) {
-        window.app.setTimeRange(range);
+        window.app.timeRange = range;
+        window.app.updateChart();
     }
 };
 
 window.clearDebugLog = function() {
-    app.clearDebugLog();
+    if (window.app) {
+        window.app.clearDebugLog();
+    }
 };
 
 window.toggleDebugLog = function() {
-    app.toggleDebugLog();
+    if (window.app) {
+        window.app.toggleDebugLog();
+    }
 };
 
 // Initialize app when DOM is loaded
-
 document.addEventListener('DOMContentLoaded', function() {
     window.app = new TradingApp();
-}); 
+});
