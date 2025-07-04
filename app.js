@@ -467,9 +467,8 @@ class TradingApp {
     updateStockPairCards() {
         Object.keys(this.yahooAPI.stocks).forEach(symbol => {
             const data = this.pairData[symbol];
-            const type = 'stock';
-            const priceEl = document.getElementById(`price-${type}-${symbol}`);
-            const statusEl = document.getElementById(`status-${type}-${symbol}`);
+            const priceEl = document.getElementById(`price-${symbol}`);
+            const statusEl = document.getElementById(`status-${symbol}`);
             if (!data) {
                 if (priceEl) priceEl.textContent = 'No recent trades';
                 if (statusEl) {
@@ -488,7 +487,7 @@ class TradingApp {
                     priceEl.textContent = 'N/A';
                 }
             }
-            const changeEl = document.getElementById(`change-${type}-${symbol}`);
+            const changeEl = document.getElementById(`change-${symbol}`);
             const changePercent = typeof data.changePercent === 'number'
                 ? data.changePercent
                 : (typeof data.change24h === 'number' ? data.change24h : undefined);
@@ -501,7 +500,7 @@ class TradingApp {
                     changeEl.style.color = '#ccc';
                 }
             }
-            const volumeEl = document.getElementById(`volume-${type}-${symbol}`);
+            const volumeEl = document.getElementById(`volume-${symbol}`);
             const volume = typeof data.volume === 'number' ? data.volume : 0;
             if (volumeEl) {
                 const volumeText = volume > 1000000 ?
