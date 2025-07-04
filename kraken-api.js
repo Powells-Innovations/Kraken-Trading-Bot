@@ -9,6 +9,10 @@
  * distribution, or use of this software, via any medium, is strictly prohibited.
  * 
  * For licensing inquiries, contact: licensing@tradingbotai.com
+ * 
+ * SECURITY NOTE: API credentials are transmitted securely via HTTPS to our proxy server.
+ * The proxy server does not store API keys - they are used only for the duration of each API request.
+ * API keys are never stored in localStorage, sessionStorage, or any persistent storage.
  */
 
 class KrakenAPI {
