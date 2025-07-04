@@ -98,7 +98,7 @@ class TradingApp {
         // Check legal disclaimer first
         if (!checkLegalDisclaimer()) {
             this.debugLog('Waiting for legal disclaimer acceptance...', 'info');
-            return;
+            // Don't return, continue with initialization
         }
 
         // Initialize components
@@ -114,7 +114,7 @@ class TradingApp {
         try {
             this.debugLog('🚀 Initializing Trading Application...', 'info');
 
-            // Initialize APIs
+            // Initialize APIs first
             this.krakenAPI = new KrakenAPI();
             this.yahooAPI = new YahooAPI();
             this.coinGeckoAPI = new CoinGeckoAPI();
@@ -128,18 +128,18 @@ class TradingApp {
                 this.tradingBot.pretrainNeuralNetWithHistory().catch(e => this.debugLog('NN pre-training error: ' + e.message, 'error'));
             }
 
-            // Set up UI event listeners
-            this.setupEventListeners();
-
-            // Initialize chart
-            await this.initializeChart();
-
             // Connect to APIs
             await this.connectToAPI();
 
             // Initialize pair cards
             this.initializeCryptoPairCards();
             this.initializeStockPairCards();
+
+            // Set up UI event listeners (after APIs are initialized)
+            this.setupEventListeners();
+
+            // Initialize chart
+            await this.initializeChart();
 
             // Start price updates
             this.startPriceUpdates();
@@ -760,19 +760,27 @@ class TradingApp {
 
         if (this.marketType !== newMarketType) {
             this.marketType = newMarketType;
-            this.tradingBot.setMarketType(newMarketType);
+            
+            // Only call setMarketType if tradingBot exists
+            if (this.tradingBot) {
+                this.tradingBot.setMarketType(newMarketType);
 
-            // Stop current trading if active
-            if (this.tradingBot.isTrading) {
-                this.tradingBot.stopTrading();
-                this.updateTradingStatus(false);
+                // Stop current trading if active
+                if (this.tradingBot.isTrading) {
+                    this.tradingBot.stopTrading();
+                    this.updateTradingStatus(false);
+                }
             }
 
             // Reconnect to the appropriate API
             this.connectToAPI().then(() => {
                 // Reinitialize pair cards
-                this.initializeCryptoPairCards();
-                this.initializeStockPairCards();
+                if (this.krakenAPI) {
+                    this.initializeCryptoPairCards();
+                }
+                if (this.yahooAPI) {
+                    this.initializeStockPairCards();
+                }
 
                 // Update chart controls
                 this.updateChartControls();
@@ -1181,6 +1189,14 @@ window.startTrading = function() {
                 window.app.showNotification('Failed to start trading', 'error');
             }
         });
+    }
+};
+
+window.testApiConnection = function() {
+    if (window.app) {
+        window.app.testApiConnection();
+    } else {
+        console.error('Trading app not initialized');
     }
 };
 
