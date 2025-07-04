@@ -222,13 +222,9 @@ app.post('/api/kraken/cancel-order', async (req, res) => {
     }
 
     const endpoint = '/0/private/CancelOrder';
-    const postData = {
-      nonce: Date.now().toString(),
-      txid: txid
-    };
-    
+    const nonce = Date.now().toString();
+    const postData = { nonce, txid };
     const signature = createSignature(endpoint, postData, apiSecret);
-    postData.nonce = nonce;
     
     const response = await fetch(`${KRAKEN_BASE_URL}${endpoint}`, {
       method: 'POST',
@@ -237,7 +233,7 @@ app.post('/api/kraken/cancel-order', async (req, res) => {
         'API-Sign': signature,
         'Content-Type': 'application/x-www-form-urlencoded'
       },
-      body: Object.keys(postData).map(key => `${key}=${encodeURIComponent(postData[key])}`).join('&')
+      body: `nonce=${nonce}&txid=${txid}`
     });
 
     const data = await response.json();
@@ -259,12 +255,10 @@ app.post('/api/kraken/closed-orders', async (req, res) => {
     const endpoint = '/0/private/ClosedOrders';
     const nonce = Date.now().toString();
     const postData = { nonce };
-    
     if (start) postData.start = start;
     if (end) postData.end = end;
     
     const signature = createSignature(endpoint, postData, apiSecret);
-    postData.nonce = nonce;
     
     const response = await fetch(`${KRAKEN_BASE_URL}${endpoint}`, {
       method: 'POST',
@@ -289,10 +283,10 @@ app.post('/api/kraken/test-credentials', async (req, res) => {
     const { apiKey, apiSecret } = req.body;
     
     if (!apiKey || !apiSecret) {
-      return res.status(400).json({ error: 'API key and secret required' });
+      return res.status(400).json({ success: false, error: 'API key and secret required' });
     }
 
-    // Test with balance endpoint
+    // Test with a simple balance request
     const endpoint = '/0/private/Balance';
     const nonce = Date.now().toString();
     const postData = { nonce };
@@ -311,12 +305,104 @@ app.post('/api/kraken/test-credentials', async (req, res) => {
     const data = await response.json();
     
     if (data.error && data.error.length > 0) {
-      res.json({ success: false, error: data.error.join(', ') });
-    } else {
-      res.json({ success: true, message: 'API credentials validated successfully' });
+      return res.json({ success: false, error: data.error.join(', ') });
     }
+    
+    res.json({ success: true, message: 'API credentials validated successfully' });
   } catch (err) {
-    res.status(500).json({ success: false, error: err.message });
+    res.status(500).json({ success: false, error: 'Failed to test credentials', details: err.message });
+  }
+});
+
+// YAHOO FINANCE PROXY ENDPOINTS
+
+// Yahoo Finance base URL
+const YAHOO_BASE_URL = 'https://query1.finance.yahoo.com/v8/finance';
+
+// Proxy endpoint for Yahoo Finance stock quotes
+app.get('/api/yahoo/quote/:ticker', async (req, res) => {
+  try {
+    const ticker = req.params.ticker;
+    const url = `${YAHOO_BASE_URL}/chart/${ticker}?interval=1m&range=1d&includePrePost=false&events=div%2Csplit`;
+    
+    const response = await fetch(url, {
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
+      }
+    });
+    
+    if (!response.ok) {
+      throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+    }
+    
+    const data = await response.json();
+    res.json(data);
+  } catch (err) {
+    res.status(500).json({ error: 'Failed to fetch from Yahoo Finance', details: err.message });
+  }
+});
+
+// Proxy endpoint for Yahoo Finance historical data
+app.get('/api/yahoo/history/:ticker', async (req, res) => {
+  try {
+    const ticker = req.params.ticker;
+    const period = req.query.period || '1d';
+    const interval = req.query.interval || '1m';
+    
+    const url = `${YAHOO_BASE_URL}/chart/${ticker}?period=${period}&interval=${interval}`;
+    
+    const response = await fetch(url, {
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
+      }
+    });
+    
+    if (!response.ok) {
+      throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+    }
+    
+    const data = await response.json();
+    res.json(data);
+  } catch (err) {
+    res.status(500).json({ error: 'Failed to fetch historical data from Yahoo Finance', details: err.message });
+  }
+});
+
+// Proxy endpoint for multiple Yahoo Finance stock quotes
+app.post('/api/yahoo/quotes', async (req, res) => {
+  try {
+    const { tickers } = req.body;
+    
+    if (!tickers || !Array.isArray(tickers)) {
+      return res.status(400).json({ error: 'Tickers array required' });
+    }
+    
+    const results = {};
+    const promises = tickers.map(async (ticker) => {
+      try {
+        const url = `${YAHOO_BASE_URL}/chart/${ticker}?interval=1m&range=1d&includePrePost=false&events=div%2Csplit`;
+        
+        const response = await fetch(url, {
+          headers: {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
+          }
+        });
+        
+        if (response.ok) {
+          const data = await response.json();
+          results[ticker] = data;
+        } else {
+          results[ticker] = { error: `HTTP ${response.status}` };
+        }
+      } catch (error) {
+        results[ticker] = { error: error.message };
+      }
+    });
+    
+    await Promise.all(promises);
+    res.json(results);
+  } catch (err) {
+    res.status(500).json({ error: 'Failed to fetch multiple quotes from Yahoo Finance', details: err.message });
   }
 });
 
