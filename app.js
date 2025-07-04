@@ -388,9 +388,8 @@ class TradingApp {
     updateCryptoPairCards() {
         Object.keys(this.krakenAPI.pairs).forEach(symbol => {
             const data = this.pairData[symbol];
-            const type = 'crypto';
-            const priceEl = document.getElementById(`price-${type}-${symbol}`);
-            const statusEl = document.getElementById(`status-${type}-${symbol}`);
+            const priceEl = document.getElementById(`price-${symbol}`);
+            const statusEl = document.getElementById(`status-${symbol}`);
             if (!data) {
                 if (priceEl) priceEl.textContent = 'No recent trades';
                 if (statusEl) {
@@ -409,7 +408,7 @@ class TradingApp {
                     priceEl.textContent = 'N/A';
                 }
             }
-            const changeEl = document.getElementById(`change-${type}-${symbol}`);
+            const changeEl = document.getElementById(`change-${symbol}`);
             // Use CoinGecko data if available, fallback to Kraken data
             const changePercent = typeof data.price_change_percentage_24h === 'number'
                 ? data.price_change_percentage_24h
@@ -425,7 +424,7 @@ class TradingApp {
                     changeEl.style.color = '#ccc';
                 }
             }
-            const volumeEl = document.getElementById(`volume-${type}-${symbol}`);
+            const volumeEl = document.getElementById(`volume-${symbol}`);
             // Use CoinGecko volume data if available
             const volume = typeof data.total_volume === 'number' ? data.total_volume :
                           (typeof data.volume === 'number' ? data.volume : 0);
@@ -437,7 +436,7 @@ class TradingApp {
             }
 
             // Add market cap info if available from CoinGecko
-            const marketCapEl = document.getElementById(`market-cap-${type}-${symbol}`);
+            const marketCapEl = document.getElementById(`market-cap-${symbol}`);
             if (marketCapEl && data.market_cap) {
                 const marketCap = data.market_cap;
                 const marketCapText = marketCap > 1000000000 ?
