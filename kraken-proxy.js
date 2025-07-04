@@ -32,8 +32,12 @@ const KRAKEN_BASE_URL = 'https://api.kraken.com';
 function createSignature(endpoint, postData, apiSecret) {
   const nonce = Date.now().toString();
   
-  // Create post data string
-  const postDataString = postData ? Object.keys(postData).map(key => `${key}=${postData[key]}`).join('&') : '';
+  // Create post data string with nonce first
+  const postDataWithNonce = { nonce, ...postData };
+  const postDataString = Object.keys(postDataWithNonce)
+    .sort()
+    .map(key => `${key}=${postDataWithNonce[key]}`)
+    .join('&');
   
   // Create the message to sign
   const message = nonce + postDataString;
@@ -91,6 +95,7 @@ app.post('/api/kraken/balance', async (req, res) => {
     }
 
     const endpoint = '/0/private/Balance';
+    const postData = { nonce: Date.now().toString() };
     const { signature, nonce } = createSignature(endpoint, {}, apiSecret);
     
     const response = await fetch(`${KRAKEN_BASE_URL}${endpoint}`, {
@@ -302,6 +307,7 @@ app.post('/api/kraken/test-credentials', async (req, res) => {
 
     // Test with balance endpoint
     const endpoint = '/0/private/Balance';
+    const postData = { nonce: Date.now().toString() };
     const { signature, nonce } = createSignature(endpoint, {}, apiSecret);
     
     const response = await fetch(`${KRAKEN_BASE_URL}${endpoint}`, {
