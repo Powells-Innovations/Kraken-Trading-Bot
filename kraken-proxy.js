@@ -3,7 +3,7 @@ const fetch = require('node-fetch');
 const path = require('path');
 const crypto = require('crypto');
 const app = express();
-const PORT = 8080;
+const PORT = process.env.PORT || 8080;
 
 // CORS middleware to allow cross-origin requests
 app.use((req, res, next) => {
