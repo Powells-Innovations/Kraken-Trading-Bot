@@ -25,11 +25,11 @@ class TradingBot {
             maxInvestment: 50,
             takeProfit: 30, // 30% enforced
             stopLoss: 10,   // 10% enforced
-            tradeFrequency: 'moderate', // Changed to moderate for swing trading
-            maxActiveTrades: 5, // Reduced from 100 to 5 for better risk management
+            tradeFrequency: 'aggressive', // Changed to aggressive for testing
+            maxActiveTrades: 10, // Increased for testing
             maxRiskPerTrade: 0.10, // 10% max risk per trade
             maxTotalRisk: 0.30, // 30% max total risk across all trades
-            cooldownMinutes: 30 // 30 minutes cooldown between trades on same asset
+            cooldownMinutes: 5 // Reduced to 5 minutes for testing
         };
         
         // Trading statistics
@@ -399,8 +399,8 @@ class TradingBot {
             this.debugLog(`[SWING] ${pair} candles available: ${this.chartData[pair]?.length}`);
         });
         
-        // Swing trading: Check for new opportunities every 30 minutes (more conservative)
-        const nowMinute = Math.floor(Date.now() / 1800000); // 30 minutes
+        // Swing trading: Check for new opportunities every 5 minutes (more aggressive for testing)
+        const nowMinute = Math.floor(Date.now() / 300000); // 5 minutes
         if (nowMinute !== this.lastTradeMinute) {
             this.tradeCounter = 0;
             this.lastTradeMinute = nowMinute;
@@ -441,7 +441,7 @@ class TradingBot {
             });
         
         // Only trade the best opportunity (if any) and respect trade limits
-        if (opportunities.length > 0 && this.tradeCounter < 1) { // Reduced from 3 to 1
+        if (opportunities.length > 0 && this.tradeCounter < 3) { // Increased from 1 to 3 for testing
             const best = opportunities[0];
             
             // Additional safety check: ensure we're not over-risking
@@ -585,13 +585,13 @@ class TradingBot {
         let finalConfidence = Math.max(confidence/100, nnResult.confidence);
         
         // Minimum confidence threshold for swing trading
-        if (finalConfidence < 0.6) {
+        if (finalConfidence < 0.4) { // Reduced from 0.6 to 0.4 for testing
             shouldTrade = false;
             reasons.push('Insufficient confidence for swing trade');
         }
         
         // Minimum risk/reward ratio for swing trading
-        if (aiLevels && aiLevels.riskRewardRatio < 1.5) {
+        if (aiLevels && aiLevels.riskRewardRatio < 1.2) { // Reduced from 1.5 to 1.2 for testing
             shouldTrade = false;
             reasons.push('Risk/reward ratio too low for swing trade');
         }
