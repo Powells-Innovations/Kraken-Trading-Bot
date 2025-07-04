@@ -19,7 +19,7 @@ class YahooAPI {
         this.retryCount = 0;
         this.maxRetries = 3;
         
-        // Popular stock tickers for trading
+        // Stock symbols and their display names
         this.stocks = {
             'AAPL': 'Apple Inc.',
             'MSFT': 'Microsoft Corporation',
@@ -31,48 +31,28 @@ class YahooAPI {
             'NFLX': 'Netflix Inc.',
             'AMD': 'Advanced Micro Devices Inc.',
             'INTC': 'Intel Corporation',
-            'JPM': 'JPMorgan Chase & Co.',
-            'JNJ': 'Johnson & Johnson',
-            'V': 'Visa Inc.',
-            'WMT': 'Walmart Inc.',
-            'PG': 'Procter & Gamble Co.',
-            'UNH': 'UnitedHealth Group Inc.',
-            'HD': 'The Home Depot Inc.',
-            'MA': 'Mastercard Inc.',
-            'DIS': 'The Walt Disney Company',
-            'PYPL': 'PayPal Holdings Inc.',
             'SPY': 'SPDR S&P 500 ETF',
             'QQQ': 'Invesco QQQ Trust',
             'IWM': 'iShares Russell 2000 ETF',
             'VTI': 'Vanguard Total Stock Market ETF'
         };
         
-        // Stock display names
+        // Stock display names (must match keys above)
         this.stockNames = {
-            'AAPL': 'Apple (AAPL)',
-            'MSFT': 'Microsoft (MSFT)',
-            'GOOGL': 'Alphabet (GOOGL)',
-            'AMZN': 'Amazon (AMZN)',
-            'TSLA': 'Tesla (TSLA)',
-            'NVDA': 'NVIDIA (NVDA)',
-            'META': 'Meta (META)',
-            'NFLX': 'Netflix (NFLX)',
-            'AMD': 'AMD (AMD)',
-            'INTC': 'Intel (INTC)',
-            'JPM': 'JPMorgan (JPM)',
-            'JNJ': 'Johnson & Johnson (JNJ)',
-            'V': 'Visa (V)',
-            'WMT': 'Walmart (WMT)',
-            'PG': 'Procter & Gamble (PG)',
-            'UNH': 'UnitedHealth (UNH)',
-            'HD': 'Home Depot (HD)',
-            'MA': 'Mastercard (MA)',
-            'DIS': 'Disney (DIS)',
-            'PYPL': 'PayPal (PYPL)',
-            'SPY': 'SPDR S&P 500 (SPY)',
-            'QQQ': 'Invesco QQQ (QQQ)',
-            'IWM': 'iShares Russell 2000 (IWM)',
-            'VTI': 'Vanguard Total Market (VTI)'
+            'AAPL': 'Apple',
+            'MSFT': 'Microsoft',
+            'GOOGL': 'Google',
+            'AMZN': 'Amazon',
+            'TSLA': 'Tesla',
+            'NVDA': 'NVIDIA',
+            'META': 'Meta',
+            'NFLX': 'Netflix',
+            'AMD': 'AMD',
+            'INTC': 'Intel',
+            'SPY': 'S&P 500 ETF',
+            'QQQ': 'NASDAQ ETF',
+            'IWM': 'Russell 2000 ETF',
+            'VTI': 'Total Market ETF'
         };
     }
 
@@ -93,6 +73,7 @@ class YahooAPI {
     async connect() {
         try {
             this.debugLog('🔗 Connecting to Yahoo Finance API...', 'connection');
+            
             // Test connection by fetching a simple stock quote
             const testResult = await this.getStockQuote('AAPL');
             if (testResult && testResult.price) {
@@ -101,12 +82,12 @@ class YahooAPI {
                 this.debugLog('✅ Successfully connected to Yahoo Finance API', 'success');
                 return true;
             } else {
-                this.debugLog('❌ Failed to connect to Yahoo Finance API', 'error');
+                this.debugLog('⚠️ Yahoo Finance API unavailable', 'warning');
                 this.isConnected = false;
                 return false;
             }
         } catch (error) {
-            this.debugLog(`❌ Failed to connect to Yahoo Finance API: ${error.message}`, 'error');
+            this.debugLog(`⚠️ Yahoo Finance API unavailable: ${error.message}`, 'warning');
             this.isConnected = false;
             return false;
         }
@@ -124,7 +105,8 @@ class YahooAPI {
                 method: 'GET',
                 headers: {
                     'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
-                }
+                },
+                timeout: 5000
             });
             
             if (!response.ok) {
@@ -164,7 +146,8 @@ class YahooAPI {
                         open: openPrice || currentPrice,
                         prevClose: prevClose,
                         timestamp: timestamp[lastIndex] * 1000,
-                        lastUpdate: Date.now()
+                        lastUpdate: Date.now(),
+                        isFallback: false
                     };
                 }
             }
@@ -172,59 +155,67 @@ class YahooAPI {
             throw new Error('Invalid data format received');
         } catch (error) {
             this.debugLog(`Failed to fetch quote for ${ticker}: ${error.message}`, 'error');
+            
             return null;
         }
     }
 
     /**
-     * Get live data for multiple stocks
+     * Update fallback data with realistic price movements
      */
-    async getStockData(tickers = null) {
+    updateFallbackData(ticker) {
+        // This method is no longer needed as fallback data is removed.
+        // Keeping it here for now, but it will not be called.
+        this.debugLog(`updateFallbackData called for ${ticker}, but fallback data is removed.`, 'warning');
+        return null;
+    }
+
+    /**
+     * Get stock data for all configured stocks
+     */
+    async getStockData() {
+        if (!this.isConnected) {
+            throw new Error('Not connected to Yahoo Finance API');
+        }
+
         try {
-            const stockList = tickers || Object.keys(this.stocks);
+            this.debugLog('Fetching stock data...', 'api');
+            
             const stockData = {};
-            this.debugLog(`Fetching data for ${stockList.length} stocks...`, 'api');
-            
-            // Fetch data in batches to avoid overwhelming the API
-            const batchSize = 5;
-            for (let i = 0; i < stockList.length; i += batchSize) {
-                const batch = stockList.slice(i, i + batchSize);
-                const batchPromises = batch.map(ticker => this.getStockQuote(ticker));
-                const batchResults = await Promise.all(batchPromises);
-                
-                batchResults.forEach((quote, index) => {
-                    if (quote) {
-                        stockData[batch[index]] = quote;
+            const promises = Object.keys(this.stocks).map(async (symbol) => {
+                try {
+                    const data = await this.getStockQuote(symbol); // Changed to getStockQuote
+                    if (data) {
+                        stockData[symbol] = data;
                     }
-                });
-                
-                // Add delay between batches to be respectful to the API
-                if (i + batchSize < stockList.length) {
-                    await this.delay(1000);
+                } catch (error) {
+                    this.debugLog(`Failed to fetch ${symbol}: ${error.message}`, 'error');
                 }
-            }
+            });
             
-            this.lastUpdate = new Date();
+            await Promise.all(promises);
+            
             this.debugLog(`✅ Fetched data for ${Object.keys(stockData).length} stocks`, 'success');
             return stockData;
         } catch (error) {
             this.debugLog(`Failed to fetch stock data: ${error.message}`, 'error');
-            return {};
+            throw error;
         }
     }
 
     /**
      * Get historical data for a stock
      */
-    async getHistoricalData(ticker, interval = '1m', range = '1d') {
+    async getHistoricalData(ticker, period = '1d', interval = '1m') {
+        if (!this.isConnected) {
+            throw new Error('Not connected to Yahoo Finance API');
+        }
+
         try {
-            const url = `${this.baseUrl}/chart/${ticker}?interval=${interval}&range=${range}&includePrePost=false&events=div%2Csplit`;
-            const response = await fetch(url, {
-                method: 'GET',
-                headers: {
-                    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
-                }
-            });
+            this.debugLog(`Fetching historical data for ${ticker}...`, 'api');
+            
+            const url = `${this.baseUrl}/chart/${ticker}?period=${period}&interval=${interval}`;
+            const response = await fetch(url);
             
             if (!response.ok) {
                 throw new Error(`HTTP ${response.status}: ${response.statusText}`);
@@ -234,32 +225,37 @@ class YahooAPI {
             
             if (data.chart && data.chart.result && data.chart.result[0]) {
                 const result = data.chart.result[0];
-                const timestamp = result.timestamp;
-                const adjClose = result.indicators.adjclose[0];
-                const quote = result.indicators.quote[0];
+                const timestamps = result.timestamp;
+                const quotes = result.indicators.quote[0];
                 
-                const historicalData = [];
-                for (let i = 0; i < timestamp.length; i++) {
-                    if (adjClose.adjclose[i] !== null && adjClose.adjclose[i] !== undefined) {
-                        historicalData.push({
-                            time: timestamp[i] * 1000,
-                            open: quote.open[i] || adjClose.adjclose[i],
-                            high: quote.high[i] || adjClose.adjclose[i],
-                            low: quote.low[i] || adjClose.adjclose[i],
-                            close: adjClose.adjclose[i],
-                            volume: quote.volume[i] || 0
-                        });
-                    }
-                }
+                const historicalData = timestamps.map((time, index) => ({
+                    time: time * 1000, // Convert to milliseconds
+                    open: quotes.open[index] || 0,
+                    high: quotes.high[index] || 0,
+                    low: quotes.low[index] || 0,
+                    close: quotes.close[index] || 0,
+                    volume: quotes.volume[index] || 0
+                }));
                 
+                this.debugLog(`✅ Fetched ${historicalData.length} historical data points for ${ticker}`, 'success');
                 return historicalData;
             } else {
-                throw new Error('Invalid historical data format');
+                throw new Error('Invalid response format from Yahoo Finance API');
             }
         } catch (error) {
             this.debugLog(`Failed to fetch historical data for ${ticker}: ${error.message}`, 'error');
-            return [];
+            throw error;
         }
+    }
+
+    /**
+     * Generate fallback historical data for demo purposes
+     */
+    generateFallbackHistoricalData(ticker) {
+        // This method is no longer needed as fallback data is removed.
+        // Keeping it here for now, but it will not be called.
+        this.debugLog(`generateFallbackHistoricalData called for ${ticker}, but fallback data is removed.`, 'warning');
+        return [];
     }
 
     /**
