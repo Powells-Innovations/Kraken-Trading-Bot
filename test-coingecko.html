@@ -1,0 +1,90 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>CoinGecko API Test</title>
+    <style>
+        body { font-family: Arial, sans-serif; margin: 20px; }
+        .test-result { margin: 10px 0; padding: 10px; border: 1px solid #ccc; }
+        .success { background-color: #d4edda; border-color: #c3e6cb; }
+        .error { background-color: #f8d7da; border-color: #f5c6cb; }
+        .info { background-color: #d1ecf1; border-color: #bee5eb; }
+    </style>
+</head>
+<body>
+    <h1>CoinGecko API Integration Test</h1>
+    <div id="results"></div>
+
+    <script src="coingecko-api.js"></script>
+    <script>
+        const resultsDiv = document.getElementById('results');
+        
+        function addResult(message, type = 'info') {
+            const div = document.createElement('div');
+            div.className = `test-result ${type}`;
+            div.textContent = message;
+            resultsDiv.appendChild(div);
+        }
+
+        async function testCoinGeckoAPI() {
+            try {
+                addResult('Starting CoinGecko API test...', 'info');
+                
+                const api = new CoinGeckoAPI();
+                
+                // Test connection
+                addResult('Testing connection...', 'info');
+                const connected = await api.connect();
+                if (connected) {
+                    addResult('✅ Connection successful', 'success');
+                } else {
+                    addResult('❌ Connection failed', 'error');
+                    return;
+                }
+                
+                // Test market data
+                addResult('Testing market data fetch...', 'info');
+                const marketData = await api.getMarketData(['bitcoin', 'ethereum']);
+                if (marketData && Object.keys(marketData).length > 0) {
+                    addResult(`✅ Market data fetched for ${Object.keys(marketData).length} coins`, 'success');
+                    
+                    // Display sample data
+                    Object.entries(marketData).forEach(([pair, data]) => {
+                        addResult(`${pair}: £${data.price.toFixed(2)} | MC: £${(data.market_cap/1000000).toFixed(1)}M | 24h: ${data.price_change_percentage_24h.toFixed(2)}%`, 'info');
+                    });
+                } else {
+                    addResult('❌ Market data fetch failed', 'error');
+                }
+                
+                // Test global data
+                addResult('Testing global data fetch...', 'info');
+                const globalData = await api.getGlobalData();
+                if (globalData) {
+                    addResult(`✅ Global data fetched - Total MC: £${(globalData.total_market_cap/1000000000).toFixed(1)}B`, 'success');
+                } else {
+                    addResult('❌ Global data fetch failed', 'error');
+                }
+                
+                // Test detailed coin data
+                addResult('Testing detailed coin data...', 'info');
+                const coinData = await api.getCoinData('bitcoin');
+                if (coinData) {
+                    addResult(`✅ Detailed data fetched for Bitcoin`, 'success');
+                    addResult(`Name: ${coinData.name} | Price: £${coinData.current_price.toFixed(2)} | Rank: #${coinData.market_cap_rank}`, 'info');
+                } else {
+                    addResult('❌ Detailed coin data fetch failed', 'error');
+                }
+                
+                addResult('🎉 All CoinGecko API tests completed successfully!', 'success');
+                
+            } catch (error) {
+                addResult(`❌ Test failed: ${error.message}`, 'error');
+            }
+        }
+
+        // Run the test when page loads
+        testCoinGeckoAPI();
+    </script>
+</body>
+</html> 
