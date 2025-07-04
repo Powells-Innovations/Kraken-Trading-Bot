@@ -1128,6 +1128,9 @@ class TradingApp {
                 return;
             }
 
+            // Update connection indicator to show testing
+            this.updateConnectionIndicator('testing');
+
             this.debugLog('Testing API credentials...', 'info');
             this.debugLog(`API Key length: ${apiKey.length}, Secret length: ${apiSecret.length}`, 'info');
             
@@ -1136,6 +1139,9 @@ class TradingApp {
             if (result.success) {
                 this.showNotification('API credentials validated successfully', 'success');
                 this.logMessage('✅ API credentials validated', 'success');
+                
+                // Update connection indicator to show connected
+                this.updateConnectionIndicator('connected');
                 
                 // Store credentials in memory (not persistent)
                 this.apiKey = apiKey;
@@ -1154,6 +1160,9 @@ class TradingApp {
                 this.logMessage(`❌ API test failed: ${result.error}`, 'error');
                 this.debugLog(`API test failed with error: ${result.error}`, 'error');
                 
+                // Update connection indicator to show disconnected
+                this.updateConnectionIndicator('disconnected');
+                
                 // Provide helpful debugging information
                 if (result.error.includes('Invalid signature')) {
                     this.debugLog('This usually means the API secret is incorrect or the signature generation is wrong', 'error');
@@ -1168,10 +1177,39 @@ class TradingApp {
             this.logMessage(`❌ API test failed: ${error.message}`, 'error');
             this.debugLog(`API test error: ${error.message}`, 'error');
             
+            // Update connection indicator to show disconnected
+            this.updateConnectionIndicator('disconnected');
+            
             // Check if it's a network error
             if (error.message.includes('fetch') || error.message.includes('network')) {
                 this.debugLog('Network error - check if the proxy server is running', 'error');
             }
+        }
+    }
+
+    /**
+     * Update connection indicator
+     */
+    updateConnectionIndicator(status) {
+        const indicator = document.getElementById('connectionIndicator');
+        if (!indicator) return;
+
+        switch (status) {
+            case 'connected':
+                indicator.textContent = '🟢';
+                indicator.className = 'connection-indicator connected';
+                break;
+            case 'disconnected':
+                indicator.textContent = '🔴';
+                indicator.className = 'connection-indicator disconnected';
+                break;
+            case 'testing':
+                indicator.textContent = '🟡';
+                indicator.className = 'connection-indicator';
+                break;
+            default:
+                indicator.textContent = '🔴';
+                indicator.className = 'connection-indicator disconnected';
         }
     }
 }
