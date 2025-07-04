@@ -149,6 +149,9 @@ class TradingApp {
                 this.fetchInitialCoinGeckoData();
             }
 
+            // Update balance label
+            this.updateBalanceLabel();
+
             this.debugLog('✅ Application initialized successfully', 'success');
 
         } catch (error) {
@@ -793,6 +796,7 @@ class TradingApp {
 
                 this.showNotification(`Switched to ${newMarketType} market`, 'success');
                 this.logMessage(`🔄 Switched to ${newMarketType} market`, 'info');
+                this.updateBalanceLabel(); // Update balance label after market type change
             });
         }
     }
@@ -1098,7 +1102,16 @@ class TradingApp {
             // Update balance display
             const balanceEl = document.getElementById('accountBalance');
             if (balanceEl && balance.ZGBP) {
-                balanceEl.textContent = `£${parseFloat(balance.ZGBP).toFixed(2)}`;
+                const liveBalance = parseFloat(balance.ZGBP);
+                balanceEl.textContent = `£${liveBalance.toFixed(2)}`;
+                
+                // Update trading bot's live balance
+                if (this.tradingBot) {
+                    this.tradingBot.updateLiveBalance(liveBalance);
+                }
+                
+                // Update balance label
+                this.updateBalanceLabel();
             }
 
             this.debugLog('Account balance updated', 'success');
@@ -1183,6 +1196,22 @@ class TradingApp {
             // Check if it's a network error
             if (error.message.includes('fetch') || error.message.includes('network')) {
                 this.debugLog('Network error - check if the proxy server is running', 'error');
+            }
+        }
+    }
+
+    /**
+     * Update balance label based on trading mode
+     */
+    updateBalanceLabel() {
+        const balanceLabel = document.getElementById('balanceLabel');
+        if (balanceLabel && this.tradingBot) {
+            if (this.tradingBot.tradingMode === 'live') {
+                balanceLabel.textContent = 'Live Account';
+                balanceLabel.style.color = '#00ff88';
+            } else {
+                balanceLabel.textContent = 'Demo Account';
+                balanceLabel.style.color = '#ffc107';
             }
         }
     }
@@ -1281,12 +1310,25 @@ window.toggleTradingMode = function() {
     
     if (modeSelect.value === 'live') {
         apiSection.style.display = 'block';
+        // Update trading bot mode to live
+        if (window.app && window.app.tradingBot) {
+            window.app.tradingBot.setTradingMode('live');
+            window.app.debugLog('Trading mode switched to LIVE', 'info');
+            window.app.updateBalanceLabel();
+        }
     } else {
         apiSection.style.display = 'none';
-        // Clear API credentials when switching to demo mode
+        // Clear API credentials and switch to demo mode
         if (window.app) {
             window.app.apiKey = null;
             window.app.apiSecret = null;
+            // Update trading bot mode to demo and clear live balance
+            if (window.app.tradingBot) {
+                window.app.tradingBot.setTradingMode('demo');
+                window.app.tradingBot.updateLiveBalance(null); // Clear live balance
+                window.app.debugLog('Trading mode switched to DEMO, live balance cleared', 'info');
+                window.app.updateBalanceLabel();
+            }
             window.app.debugLog('API credentials cleared (switched to demo mode)', 'info');
         }
     }
