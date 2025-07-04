@@ -29,10 +29,10 @@ class TradingBot {
             takeProfit: 30, // 30% enforced
             stopLoss: 10,   // 10% enforced
             tradeFrequency: 'aggressive', // Changed to aggressive for testing
-            maxActiveTrades: 10, // Increased for testing
+            maxActiveTrades: 15, // Increased from 10 to 15 for testing
             maxRiskPerTrade: 0.10, // 10% max risk per trade
             maxTotalRisk: 0.30, // 30% max total risk across all trades
-            cooldownMinutes: 5 // Reduced to 5 minutes for testing
+            cooldownMinutes: 3 // Reduced to 3 minutes for testing
         };
         
         // Trading statistics
@@ -413,8 +413,8 @@ class TradingBot {
             this.debugLog(`[SWING] ${pair} candles available: ${this.chartData[pair]?.length}`);
         });
         
-        // Swing trading: Check for new opportunities every 5 minutes (more aggressive for testing)
-        const nowMinute = Math.floor(Date.now() / 300000); // 5 minutes
+        // Swing trading: Check for new opportunities every 2 minutes (more aggressive for testing)
+        const nowMinute = Math.floor(Date.now() / 120000); // 2 minutes
         if (nowMinute !== this.lastTradeMinute) {
             this.tradeCounter = 0;
             this.lastTradeMinute = nowMinute;
@@ -443,6 +443,11 @@ class TradingBot {
             this.debugLog(`[AI] ${r.pair}: side=${r.decision.side} shouldTrade=${r.decision.shouldTrade} conf=${(r.decision.confidence*100).toFixed(1)}% reason=${r.decision.reason}`,'info');
         }
         
+        // Additional debug logging
+        this.debugLog(`[SWING] Total pairs analyzed: ${results.length}`, 'info');
+        this.debugLog(`[SWING] Pairs with shouldTrade=true: ${results.filter(r => r.decision.shouldTrade).length}`, 'info');
+        this.debugLog(`[SWING] Pairs that can trade: ${results.filter(r => r.decision.shouldTrade && this.canTrade(r.pair)).length}`, 'info');
+        
         // Sort opportunities by confidence and risk/reward ratio
         const opportunities = results
             .filter(r => r.decision.shouldTrade && this.canTrade(r.pair))
@@ -455,7 +460,7 @@ class TradingBot {
             });
         
         // Only trade the best opportunity (if any) and respect trade limits
-        if (opportunities.length > 0 && this.tradeCounter < 3) { // Increased from 1 to 3 for testing
+        if (opportunities.length > 0 && this.tradeCounter < 5) { // Increased from 3 to 5 for testing
             const best = opportunities[0];
             
             // Additional safety check: ensure we're not over-risking
@@ -488,7 +493,7 @@ class TradingBot {
         const chartData = this.getChartData(pair, 'candlestick');
         
         // Check if we have enough data, but be more lenient for testing
-        if (!chartData || chartData.length < 20) { // Reduced from 50 to 20
+        if (!chartData || chartData.length < 10) { // Reduced from 20 to 10
             this.debugLog(`[AI] ${pair}: Insufficient data (${chartData?.length || 0} candles), using simplified analysis`, 'warning');
             return this.getSimplifiedDecision(pair, data);
         }
@@ -612,37 +617,55 @@ class TradingBot {
         // Calculate AI-recommended stop loss and take profit
         const aiLevels = this.calculateAITradeLevels(pair, data, indicators, finalSide);
         
+        // Fallback to simple levels if AI calculation fails
+        let stopLoss, takeProfit, riskRewardRatio;
+        if (aiLevels) {
+            stopLoss = aiLevels.stopLoss;
+            takeProfit = aiLevels.takeProfit;
+            riskRewardRatio = aiLevels.riskRewardRatio;
+        } else {
+            // Simple fallback levels
+            if (finalSide === 'BUY') {
+                stopLoss = data.price * 0.95; // 5% stop loss
+                takeProfit = data.price * 1.15; // 15% take profit
+            } else if (finalSide === 'SELL') {
+                stopLoss = data.price * 1.05; // 5% stop loss
+                takeProfit = data.price * 0.85; // 15% take profit
+            }
+            riskRewardRatio = 3.0; // 3:1 risk/reward ratio
+        }
+        
         // Additional swing trading filters
-        let shouldTrade = finalSide !== null && aiLevels !== null;
+        let shouldTrade = finalSide !== null;
         let finalConfidence = Math.max(confidence/100, nnResult.confidence);
         
-        // Minimum confidence threshold for swing trading - reduced for testing
-        if (finalConfidence < 0.3) { // Reduced from 0.4 to 0.3 for testing
+        // Minimum confidence threshold for swing trading - further reduced for testing
+        if (finalConfidence < 0.2) { // Reduced from 0.3 to 0.2 for testing
             shouldTrade = false;
             reasons.push('Insufficient confidence for swing trade');
         }
         
-        // Minimum risk/reward ratio for swing trading - reduced for testing
-        if (aiLevels && aiLevels.riskRewardRatio < 1.1) { // Reduced from 1.2 to 1.1 for testing
+        // Minimum risk/reward ratio for swing trading - further reduced for testing
+        if (riskRewardRatio < 1.0) { // Use local variable instead of aiLevels
             shouldTrade = false;
             reasons.push('Risk/reward ratio too low for swing trade');
         }
         
         // Check if we're in a strong trend (prefer trend-following for swing trading)
         const trendStrength = Math.abs(indicators.adx);
-        if (trendStrength < 15) { // Reduced from 20 to 15
-            finalConfidence *= 0.8; // Reduce confidence in low trend strength
+        if (trendStrength < 10) { // Reduced from 15 to 10
+            finalConfidence *= 0.9; // Reduce confidence less in low trend strength
             reasons.push('Weak trend strength');
         }
         
         // Market volatility check (avoid extremely volatile or stagnant markets)
         const atr = this.calculateATR(chartData, 14);
         const volatilityRatio = atr / data.price;
-        if (volatilityRatio > 0.05) { // More than 5% volatility
+        if (volatilityRatio > 0.08) { // More than 8% volatility (increased threshold)
             finalConfidence *= 0.9; // Reduce confidence in high volatility
             reasons.push('High volatility');
-        } else if (volatilityRatio < 0.01) { // Less than 1% volatility
-            finalConfidence *= 0.7; // Reduce confidence in low volatility
+        } else if (volatilityRatio < 0.005) { // Less than 0.5% volatility (reduced threshold)
+            finalConfidence *= 0.8; // Reduce confidence less in low volatility
             reasons.push('Low volatility');
         }
         
@@ -651,9 +674,9 @@ class TradingBot {
             side: finalSide,
             reason: reasons.slice(0, 3).join(', '),
             confidence: finalConfidence,
-            stopLoss: aiLevels?.stopLoss || null,
-            takeProfit: aiLevels?.takeProfit || null,
-            riskRewardRatio: aiLevels?.riskRewardRatio || null,
+            stopLoss: stopLoss,
+            takeProfit: takeProfit,
+            riskRewardRatio: riskRewardRatio,
             signalsUsed: {trend: w.trend, rsi: w.rsi, macd: w.macd, volume: w.volume, swing: w.swing, support: w.support, adx: w.adx},
             nnConfidence: nnResult.confidence,
             trendStrength: trendStrength,
@@ -680,22 +703,22 @@ class TradingBot {
         let confidence = 0.3; // Base confidence for simplified analysis
         let reasons = [];
         
-        // Simple momentum-based decision
-        if (priceChange > 1.0) { // 1% price increase
+        // Simple momentum-based decision - more aggressive
+        if (priceChange > 0.5) { // 0.5% price increase (reduced from 1.0%)
             side = 'BUY';
-            confidence += 0.2;
+            confidence += 0.3;
             reasons.push('Positive momentum');
-        } else if (priceChange < -1.0) { // 1% price decrease
+        } else if (priceChange < -0.5) { // 0.5% price decrease (reduced from 1.0%)
+            side = 'SELL';
+            confidence += 0.3;
+            reasons.push('Negative momentum');
+        } else if (priceChange > 0.2) {
+            side = 'BUY';
+            confidence += 0.2;
+            reasons.push('Slight positive momentum');
+        } else if (priceChange < -0.2) {
             side = 'SELL';
             confidence += 0.2;
-            reasons.push('Negative momentum');
-        } else if (priceChange > 0.5) {
-            side = 'BUY';
-            confidence += 0.1;
-            reasons.push('Slight positive momentum');
-        } else if (priceChange < -0.5) {
-            side = 'SELL';
-            confidence += 0.1;
             reasons.push('Slight negative momentum');
         }
         
@@ -709,7 +732,7 @@ class TradingBot {
             takeProfit = currentPrice * 0.85; // 15% take profit
         }
         
-        const shouldTrade = side !== null && confidence >= 0.3;
+        const shouldTrade = side !== null && confidence >= 0.2; // Reduced from 0.3 to 0.2
         
         return {
             shouldTrade: shouldTrade,
@@ -1005,14 +1028,14 @@ class TradingBot {
         const reward = Math.abs(takeProfit - currentPrice);
         riskRewardRatio = reward / risk;
 
-        // Ensure minimum risk/reward ratio of 1.5:1
-        if (riskRewardRatio < 1.5) {
+        // Ensure minimum risk/reward ratio of 1.2:1 (reduced from 1.5)
+        if (riskRewardRatio < 1.2) {
             if (side === 'BUY') {
-                takeProfit = currentPrice + (risk * 1.5);
+                takeProfit = currentPrice + (risk * 1.2);
             } else {
-                takeProfit = currentPrice - (risk * 1.5);
+                takeProfit = currentPrice - (risk * 1.2);
             }
-            riskRewardRatio = 1.5;
+            riskRewardRatio = 1.2;
         }
 
         return {
@@ -1072,6 +1095,11 @@ class TradingBot {
             // Fallback to fixed investment if no stop loss
             if (positionSize <= 0) {
                 positionSize = this.getDynamicInvestment(pair, aiConfidence) / price;
+            }
+            
+            // Ensure minimum position size
+            if (positionSize <= 0) {
+                positionSize = this.settings.maxInvestment / price;
             }
             
             // Ensure position size doesn't exceed max investment
@@ -1337,9 +1365,9 @@ class TradingBot {
      * Check if we can execute a trade with improved risk management
      */
     canTrade(pair) {
-        // Check if we already have active trades for this pair (prevent duplicates)
-        if (this.activeTrades[pair] && this.activeTrades[pair].length >= 1) {
-            this.debugLog(`[canTrade] Blocked: already have active trade for ${pair}`, 'warning');
+        // Check if we already have too many active trades for this pair (allow up to 2)
+        if (this.activeTrades[pair] && this.activeTrades[pair].length >= 2) {
+            this.debugLog(`[canTrade] Blocked: too many active trades for ${pair} (${this.activeTrades[pair].length})`, 'warning');
             return false;
         }
         
