@@ -256,18 +256,40 @@ class KrakenAPI {
 
     /**
      * Get account balance (for live trading)
-     * Note: This requires proper server-side implementation for security
+     * Now uses secure server-side proxy with HMAC signing
      */
     async getAccountBalance(apiKey, apiSecret) {
         if (!apiKey || !apiSecret) {
             throw new Error('API credentials required for account balance');
         }
 
-        // For security reasons, private API calls should be handled server-side
-        // This is a placeholder that would need server implementation
-        this.debugLog('⚠️ Account balance requires server-side HMAC signing for security', 'warning');
-        
-        throw new Error('Account balance requires server-side implementation for security');
+        try {
+            this.debugLog('Fetching account balance via secure proxy...', 'api');
+            
+            const response = await fetch(`${this.baseUrl}/balance`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({ apiKey, apiSecret })
+            });
+
+            if (!response.ok) {
+                throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+            }
+
+            const data = await response.json();
+            
+            if (data.error && data.error.length > 0) {
+                throw new Error(`API Error: ${data.error.join(', ')}`);
+            }
+
+            this.debugLog('✅ Account balance fetched successfully', 'success');
+            return data.result;
+        } catch (error) {
+            this.debugLog(`Failed to fetch account balance: ${error.message}`, 'error');
+            throw error;
+        }
     }
 
     /**
@@ -284,21 +306,225 @@ class KrakenAPI {
             }
 
             this.debugLog('Testing API credentials...', 'api');
-            // Test with account balance endpoint
-            const balance = await this.getAccountBalance(apiKey, apiSecret);
             
-            this.debugLog('✅ API credentials validated successfully', 'success');
-            return {
-                success: true,
-                balance: balance.balance,
-                message: 'API credentials validated successfully'
-            };
+            const response = await fetch(`${this.baseUrl}/test-credentials`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({ apiKey, apiSecret })
+            });
+
+            if (!response.ok) {
+                throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+            }
+
+            const data = await response.json();
+            
+            if (data.success) {
+                this.debugLog('✅ API credentials validated successfully', 'success');
+                return {
+                    success: true,
+                    message: data.message
+                };
+            } else {
+                throw new Error(data.error || 'Unknown error');
+            }
         } catch (error) {
             this.debugLog(`API credentials test failed: ${error.message}`, 'error');
             return {
                 success: false,
                 error: error.message
             };
+        }
+    }
+
+    /**
+     * Place buy order
+     */
+    async placeBuyOrder(apiKey, apiSecret, pair, volume, price = null) {
+        if (!apiKey || !apiSecret || !pair || !volume) {
+            throw new Error('API credentials, pair, and volume required');
+        }
+
+        try {
+            this.debugLog(`Placing buy order: ${volume} ${pair}${price ? ` at £${price}` : ' (market)'}`, 'trade');
+            
+            const response = await fetch(`${this.baseUrl}/buy`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({ apiKey, apiSecret, pair, volume, price })
+            });
+
+            if (!response.ok) {
+                throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+            }
+
+            const data = await response.json();
+            
+            if (data.error && data.error.length > 0) {
+                throw new Error(`API Error: ${data.error.join(', ')}`);
+            }
+
+            this.debugLog('✅ Buy order placed successfully', 'success');
+            return data.result;
+        } catch (error) {
+            this.debugLog(`Failed to place buy order: ${error.message}`, 'error');
+            throw error;
+        }
+    }
+
+    /**
+     * Place sell order
+     */
+    async placeSellOrder(apiKey, apiSecret, pair, volume, price = null) {
+        if (!apiKey || !apiSecret || !pair || !volume) {
+            throw new Error('API credentials, pair, and volume required');
+        }
+
+        try {
+            this.debugLog(`Placing sell order: ${volume} ${pair}${price ? ` at £${price}` : ' (market)'}`, 'trade');
+            
+            const response = await fetch(`${this.baseUrl}/sell`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({ apiKey, apiSecret, pair, volume, price })
+            });
+
+            if (!response.ok) {
+                throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+            }
+
+            const data = await response.json();
+            
+            if (data.error && data.error.length > 0) {
+                throw new Error(`API Error: ${data.error.join(', ')}`);
+            }
+
+            this.debugLog('✅ Sell order placed successfully', 'success');
+            return data.result;
+        } catch (error) {
+            this.debugLog(`Failed to place sell order: ${error.message}`, 'error');
+            throw error;
+        }
+    }
+
+    /**
+     * Get open orders
+     */
+    async getOpenOrders(apiKey, apiSecret) {
+        if (!apiKey || !apiSecret) {
+            throw new Error('API credentials required');
+        }
+
+        try {
+            this.debugLog('Fetching open orders...', 'api');
+            
+            const response = await fetch(`${this.baseUrl}/open-orders`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({ apiKey, apiSecret })
+            });
+
+            if (!response.ok) {
+                throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+            }
+
+            const data = await response.json();
+            
+            if (data.error && data.error.length > 0) {
+                throw new Error(`API Error: ${data.error.join(', ')}`);
+            }
+
+            this.debugLog('✅ Open orders fetched successfully', 'success');
+            return data.result;
+        } catch (error) {
+            this.debugLog(`Failed to fetch open orders: ${error.message}`, 'error');
+            throw error;
+        }
+    }
+
+    /**
+     * Cancel order
+     */
+    async cancelOrder(apiKey, apiSecret, txid) {
+        if (!apiKey || !apiSecret || !txid) {
+            throw new Error('API credentials and transaction ID required');
+        }
+
+        try {
+            this.debugLog(`Cancelling order: ${txid}`, 'trade');
+            
+            const response = await fetch(`${this.baseUrl}/cancel-order`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({ apiKey, apiSecret, txid })
+            });
+
+            if (!response.ok) {
+                throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+            }
+
+            const data = await response.json();
+            
+            if (data.error && data.error.length > 0) {
+                throw new Error(`API Error: ${data.error.join(', ')}`);
+            }
+
+            this.debugLog('✅ Order cancelled successfully', 'success');
+            return data.result;
+        } catch (error) {
+            this.debugLog(`Failed to cancel order: ${error.message}`, 'error');
+            throw error;
+        }
+    }
+
+    /**
+     * Get closed orders (trade history)
+     */
+    async getClosedOrders(apiKey, apiSecret, start = null, end = null) {
+        if (!apiKey || !apiSecret) {
+            throw new Error('API credentials required');
+        }
+
+        try {
+            this.debugLog('Fetching closed orders...', 'api');
+            
+            const body = { apiKey, apiSecret };
+            if (start) body.start = start;
+            if (end) body.end = end;
+            
+            const response = await fetch(`${this.baseUrl}/closed-orders`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify(body)
+            });
+
+            if (!response.ok) {
+                throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+            }
+
+            const data = await response.json();
+            
+            if (data.error && data.error.length > 0) {
+                throw new Error(`API Error: ${data.error.join(', ')}`);
+            }
+
+            this.debugLog('✅ Closed orders fetched successfully', 'success');
+            return data.result;
+        } catch (error) {
+            this.debugLog(`Failed to fetch closed orders: ${error.message}`, 'error');
+            throw error;
         }
     }
 
