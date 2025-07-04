@@ -5,6 +5,11 @@ const crypto = require('crypto');
 const app = express();
 const PORT = process.env.PORT || 8080;
 
+// Add a root route for health checks and status
+app.get('/', (req, res) => {
+  res.send('Kraken Proxy is running!');
+});
+
 // CORS middleware to allow cross-origin requests
 app.use((req, res, next) => {
     res.header('Access-Control-Allow-Origin', '*');
