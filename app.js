@@ -14,7 +14,7 @@
 class TradingApp {
     constructor() {
         this.krakenAPI = null;
-        this.stockAPI = null;
+        this.yahooAPI = null;
         this.tradingBot = null;
         this.chart = null;
         this.selectedPair = 'BTCGBP';
@@ -44,7 +44,7 @@ class TradingApp {
             
             // Initialize APIs
             this.krakenAPI = new KrakenAPI();
-            this.stockAPI = new StockAPI();
+            this.yahooAPI = new YahooAPI();
             
             // Initialize Trading Bot
             this.tradingBot = new TradingBot();
@@ -101,20 +101,20 @@ class TradingApp {
                     throw new Error('Kraken API connection failed - Real market data required');
                 }
             } else {
-                this.debugLog('🔗 Attempting to connect to Stock API...', 'connection');
-                const connected = await this.stockAPI.connect();
+                this.debugLog('🔗 Attempting to connect to Yahoo Finance API...', 'connection');
+                const connected = await this.yahooAPI.connect();
                 if (connected) {
                     this.updateAPIStatus(true);
-                    this.showNotification('Connected to Stock API', 'success');
+                    this.showNotification('Connected to Yahoo Finance API', 'success');
                     this.logMessage('✅ Connected to live stock data', 'info');
-                    this.debugLog('✅ Successfully connected to Stock API', 'success');
+                    this.debugLog('✅ Successfully connected to Yahoo Finance API', 'success');
                     this.initializeStockPairCards();
                 } else {
                     this.updateAPIStatus(false);
-                    this.showNotification('Failed to connect to Stock API', 'error');
-                    this.logMessage('❌ Stock API connection failed', 'error');
-                    this.debugLog('❌ Stock API connection failed', 'error');
-                    throw new Error('Stock API connection failed');
+                    this.showNotification('Failed to connect to Yahoo Finance API', 'error');
+                    this.logMessage('❌ Yahoo Finance API connection failed', 'error');
+                    this.debugLog('❌ Yahoo Finance API connection failed', 'error');
+                    throw new Error('Yahoo Finance API connection failed');
                 }
             }
         } catch (error) {
@@ -150,8 +150,8 @@ class TradingApp {
         // Stocks update every 60 seconds
         this.stockPriceUpdateInterval = setInterval(async () => {
             try {
-                if (this.stockAPI.isConnected) {
-                    const stockData = await this.stockAPI.getStockData();
+                if (this.yahooAPI.isConnected) {
+                    const stockData = await this.yahooAPI.getStockData();
                     this.updatePairData(stockData);
                 }
                 this.updateUI();
@@ -233,7 +233,7 @@ class TradingApp {
         const container = document.getElementById('stockPairsGrid');
         if (!container) return;
         container.innerHTML = '';
-        Object.keys(this.stockAPI.stocks).forEach(stock => {
+        Object.keys(this.yahooAPI.stocks).forEach(stock => {
             const card = this.createPairCard(stock, 'stock');
             container.appendChild(card);
         });
@@ -252,7 +252,7 @@ class TradingApp {
             changeLabel = '24h Change';
             currency = '£';
         } else {
-            symbolName = this.stockAPI.stockNames[symbol];
+            symbolName = this.yahooAPI.stockNames[symbol];
             changeLabel = '24h Change';
             currency = '$';
         }
@@ -354,7 +354,7 @@ class TradingApp {
      * Update stock trading pair cards
      */
     updateStockPairCards() {
-        Object.keys(this.stockAPI.stocks).forEach(symbol => {
+        Object.keys(this.yahooAPI.stocks).forEach(symbol => {
             const data = this.pairData[symbol];
             const type = 'stock';
             const priceEl = document.getElementById(`price-${type}-${symbol}`);
@@ -703,7 +703,7 @@ class TradingApp {
                 const button = document.createElement('button');
                 button.className = `pair-btn ${index === 0 ? 'active' : ''}`;
                 button.onclick = () => this.selectPair(ticker);
-                button.textContent = this.stockAPI.stockNames[ticker];
+                button.textContent = this.yahooAPI.stockNames[ticker];
                 pairSelector.appendChild(button);
             });
             this.selectedPair = 'AAPL';
