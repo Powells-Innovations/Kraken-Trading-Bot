@@ -42,9 +42,12 @@ class TradingBot {
             losingTrades: 0,
             totalPnL: 0,
             todayPnL: 0,
-            accountBalance: 1000,
+            accountBalance: 1000, // Demo balance
             startDate: new Date()
         };
+        
+        // Live balance storage (for live trading mode)
+        this.liveBalance = null;
         
         // Risk management
         this.riskManager = {
@@ -242,6 +245,14 @@ class TradingBot {
     setTradingMode(mode) {
         this.tradingMode = mode;
         this.debugLog(`Trading mode set to: ${mode}`, 'info');
+    }
+
+    /**
+     * Update live balance (called from app.js when fetching real balance)
+     */
+    updateLiveBalance(balance) {
+        this.liveBalance = balance;
+        this.debugLog(`Live balance updated: £${balance}`, 'info');
     }
 
     /**
@@ -1448,8 +1459,14 @@ class TradingBot {
                 });
             }
         });
+        
+        // Use live balance if available and in live mode, otherwise use demo balance
+        const baseBalance = (this.tradingMode === 'live' && this.liveBalance !== null) 
+            ? this.liveBalance 
+            : this.tradingStats.accountBalance;
+        
         return {
-            accountBalance: this.tradingStats.accountBalance + unrealizedPnL,
+            accountBalance: baseBalance + unrealizedPnL,
             totalPnL: this.tradingStats.totalPnL + unrealizedPnL,
             todayPnL: this.tradingStats.todayPnL + unrealizedPnL,
             totalTrades: this.tradingStats.totalTrades,
