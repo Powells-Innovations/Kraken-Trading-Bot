@@ -91,7 +91,9 @@ app.post('/api/kraken/balance', async (req, res) => {
     }
 
     const endpoint = '/0/private/Balance';
-    const { signature, nonce } = createSignature(endpoint, {}, apiSecret);
+    const nonce = Date.now().toString();
+    const postData = { nonce };
+    const { signature } = createSignature(endpoint, postData, apiSecret);
     
     const response = await fetch(`${KRAKEN_BASE_URL}${endpoint}`, {
       method: 'POST',
@@ -302,7 +304,9 @@ app.post('/api/kraken/test-credentials', async (req, res) => {
 
     // Test with balance endpoint
     const endpoint = '/0/private/Balance';
-    const { signature, nonce } = createSignature(endpoint, {}, apiSecret);
+    const nonce = Date.now().toString();
+    const postData = { nonce };
+    const { signature } = createSignature(endpoint, postData, apiSecret);
     
     const response = await fetch(`${KRAKEN_BASE_URL}${endpoint}`, {
       method: 'POST',
