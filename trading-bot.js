@@ -346,14 +346,16 @@ class TradingBot {
     /**
      * Check active trades for take profit/stop loss and perform high-frequency scalping
      */
-    checkActiveTrades(tickerData) {
+    async checkActiveTrades(tickerData) {
         // Close trades using AI levels
-        Object.keys(this.activeTrades).forEach(pair => {
+        for (const pair of Object.keys(this.activeTrades)) {
             const trades = this.activeTrades[pair];
-            if (!Array.isArray(trades)) return;
-            trades.forEach((trade, idx) => {
+            if (!Array.isArray(trades)) continue;
+            
+            for (let idx = trades.length - 1; idx >= 0; idx--) {
+                const trade = trades[idx];
                 const currentPrice = tickerData[pair]?.price;
-                if (!currentPrice) return;
+                if (!currentPrice) continue;
                 
                 // Use AI levels if available, otherwise fall back to manual settings
                 const stopLoss = trade.aiStopLoss || trade.stopLoss;
@@ -361,26 +363,27 @@ class TradingBot {
                 
                 // Check for take profit
                 if (trade.side === 'BUY' && currentPrice >= takeProfit) {
-                    this.closeTrade(pair, 'AI Take Profit', idx);
-                    return;
+                    await this.closeTrade(pair, 'AI Take Profit', idx);
+                    continue;
                 } else if (trade.side === 'SELL' && currentPrice <= takeProfit) {
-                    this.closeTrade(pair, 'AI Take Profit', idx);
-                    return;
+                    await this.closeTrade(pair, 'AI Take Profit', idx);
+                    continue;
                 }
                 
                 // Check for stop loss
                 if (trade.side === 'BUY' && currentPrice <= stopLoss) {
-                    this.closeTrade(pair, 'AI Stop Loss', idx);
-                    return;
+                    await this.closeTrade(pair, 'AI Stop Loss', idx);
+                    continue;
                 } else if (trade.side === 'SELL' && currentPrice >= stopLoss) {
-                    this.closeTrade(pair, 'AI Stop Loss', idx);
-                    return;
+                    await this.closeTrade(pair, 'AI Stop Loss', idx);
+                    continue;
                 }
                 
                 // Update unrealized P&L
                 trade.unrealizedPnL = this.calculatePnL(trade, currentPrice);
-            });
-        });
+            }
+        }
+        
         // Swing trading: intelligent decisions based on longer-term trends
         if (this.isTrading) {
             this.swingTrade(tickerData);
@@ -949,7 +952,7 @@ class TradingBot {
     /**
      * Execute a trade
      */
-    executeTrade(pair, side, price, reason = 'Signal', aiStopLoss = null, aiTakeProfit = null, aiConfidence = 1) {
+    async executeTrade(pair, side, price, reason = 'Signal', aiStopLoss = null, aiTakeProfit = null, aiConfidence = 1) {
         try {
             if (!this.canTrade(pair)) {
                 this.debugLog(`[executeTrade] Not executing trade for ${pair} - canTrade returned false`, 'warning');
@@ -987,9 +990,50 @@ class TradingBot {
                 this.debugLog(`[executeTrade] Blocked: trade risk too high (${tradeRisk.toFixed(1)}%)`, 'warning');
                 return false;
             }
+
+            // LIVE TRADING: Execute actual order if in live mode
+            let orderResult = null;
+            if (this.tradingMode === 'live' && window.app && window.app.apiKey && window.app.apiSecret) {
+                try {
+                    this.debugLog(`🚀 Executing LIVE ${side} order for ${pair}...`, 'trade');
+                    
+                    // Get the correct Kraken pair code
+                    const krakenPair = window.app.krakenAPI.pairs[pair];
+                    if (!krakenPair) {
+                        throw new Error(`Unknown pair: ${pair}`);
+                    }
+                    
+                    if (side === 'BUY') {
+                        orderResult = await window.app.krakenAPI.placeBuyOrder(
+                            window.app.apiKey, 
+                            window.app.apiSecret, 
+                            krakenPair, 
+                            positionSize, 
+                            null // Market order
+                        );
+                    } else if (side === 'SELL') {
+                        orderResult = await window.app.krakenAPI.placeSellOrder(
+                            window.app.apiKey, 
+                            window.app.apiSecret, 
+                            krakenPair, 
+                            positionSize, 
+                            null // Market order
+                        );
+                    }
+                    
+                    if (orderResult && orderResult.txid) {
+                        this.debugLog(`✅ LIVE order executed successfully: ${orderResult.txid[0]}`, 'success');
+                    } else {
+                        throw new Error('Order execution failed - no transaction ID returned');
+                    }
+                } catch (error) {
+                    this.debugLog(`❌ LIVE order failed: ${error.message}`, 'error');
+                    return false;
+                }
+            }
             
             const trade = {
-                id: Date.now().toString(),
+                id: orderResult?.txid?.[0] || Date.now().toString(),
                 pair: pair,
                 side: side,
                 entryPrice: price,
@@ -1001,7 +1045,8 @@ class TradingBot {
                 aiStopLoss: aiStopLoss,
                 aiTakeProfit: aiTakeProfit,
                 unrealizedPnL: 0,
-                riskPercentage: tradeRisk
+                riskPercentage: tradeRisk,
+                orderResult: orderResult
             };
 
             // Initialize array if not exists
@@ -1017,7 +1062,8 @@ class TradingBot {
             // Update total risk exposure
             this.riskManager.totalRiskExposure += (investment / accountBalance) * (tradeRisk / 100);
 
-            this.debugLog(`💰 ${side} ${pair}: £${investment.toFixed(2)} at £${price.toFixed(4)} | Qty: ${positionSize.toFixed(6)} | Risk: ${tradeRisk.toFixed(1)}% | Reason: ${reason}`, 'success');
+            const modeIcon = this.tradingMode === 'live' ? '💰' : '📊';
+            this.debugLog(`${modeIcon} ${side} ${pair}: £${investment.toFixed(2)} at £${price.toFixed(4)} | Qty: ${positionSize.toFixed(6)} | Risk: ${tradeRisk.toFixed(1)}% | Reason: ${reason}`, 'success');
             
             if (window.app) {
                 window.app.addLogEntry({
@@ -1030,7 +1076,8 @@ class TradingBot {
                     mode: this.tradingMode,
                     timestamp: new Date(),
                     aiStopLoss: aiStopLoss,
-                    aiTakeProfit: aiTakeProfit
+                    aiTakeProfit: aiTakeProfit,
+                    orderId: orderResult?.txid?.[0]
                 });
                 // Update UI immediately after trade execution
                 window.app.updateStatistics();
@@ -1045,7 +1092,7 @@ class TradingBot {
     /**
      * Close a specific trade by index, only with valid price
      */
-    closeTrade(pair, reason, idx) {
+    async closeTrade(pair, reason, idx) {
         const trades = this.activeTrades[pair];
         if (!Array.isArray(trades) || trades.length === 0) return;
         const trade = trades[idx];
@@ -1053,6 +1100,51 @@ class TradingBot {
         const currentPrice = this.getCurrentPrice(pair);
         if (!currentPrice || currentPrice <= 0) return;
         const pnl = this.calculatePnL(trade, currentPrice);
+        
+        // LIVE TRADING: Execute actual sell order if in live mode
+        let closeOrderResult = null;
+        if (this.tradingMode === 'live' && window.app && window.app.apiKey && window.app.apiSecret && trade.orderResult?.txid) {
+            try {
+                this.debugLog(`🚀 Executing LIVE close order for ${pair}...`, 'trade');
+                
+                // Get the correct Kraken pair code
+                const krakenPair = window.app.krakenAPI.pairs[pair];
+                if (!krakenPair) {
+                    throw new Error(`Unknown pair: ${pair}`);
+                }
+                
+                // For closing a BUY trade, we need to SELL
+                // For closing a SELL trade, we need to BUY
+                const closeSide = trade.side === 'BUY' ? 'SELL' : 'BUY';
+                
+                if (closeSide === 'SELL') {
+                    closeOrderResult = await window.app.krakenAPI.placeSellOrder(
+                        window.app.apiKey, 
+                        window.app.apiSecret, 
+                        krakenPair, 
+                        trade.quantity, 
+                        null // Market order
+                    );
+                } else {
+                    closeOrderResult = await window.app.krakenAPI.placeBuyOrder(
+                        window.app.apiKey, 
+                        window.app.apiSecret, 
+                        krakenPair, 
+                        trade.quantity, 
+                        null // Market order
+                    );
+                }
+                
+                if (closeOrderResult && closeOrderResult.txid) {
+                    this.debugLog(`✅ LIVE close order executed successfully: ${closeOrderResult.txid[0]}`, 'success');
+                } else {
+                    throw new Error('Close order execution failed - no transaction ID returned');
+                }
+            } catch (error) {
+                this.debugLog(`❌ LIVE close order failed: ${error.message}`, 'error');
+                // Continue with paper trading close for now
+            }
+        }
         
         // Update statistics
         this.tradingStats.totalPnL += pnl;
@@ -1078,12 +1170,14 @@ class TradingBot {
             exitPrice: currentPrice,
             exitTime: Date.now(),
             pnl: pnl,
-            reason: reason
+            reason: reason,
+            closeOrderResult: closeOrderResult
         };
         this.tradeHistory.push(closedTrade);
         trades.splice(idx, 1);
         
-        this.debugLog(`📉 Closed ${pair}: ${pnl >= 0 ? '+' : ''}£${pnl.toFixed(2)} (${reason}) | Total Risk: ${(this.riskManager.totalRiskExposure*100).toFixed(1)}%`, pnl >= 0 ? 'success' : 'error');
+        const modeIcon = this.tradingMode === 'live' ? '💰' : '📊';
+        this.debugLog(`${modeIcon} Closed ${pair}: ${pnl >= 0 ? '+' : ''}£${pnl.toFixed(2)} (${reason}) | Total Risk: ${(this.riskManager.totalRiskExposure*100).toFixed(1)}%`, pnl >= 0 ? 'success' : 'error');
         
         if (window.app) {
             window.app.addLogEntry({
@@ -1093,7 +1187,8 @@ class TradingBot {
                 pnl: pnl,
                 reason: reason,
                 mode: this.tradingMode,
-                timestamp: new Date()
+                timestamp: new Date(),
+                closeOrderId: closeOrderResult?.txid?.[0]
             });
             // Update UI immediately after trade closure
             window.app.updateStatistics();
