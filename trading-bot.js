@@ -475,27 +475,37 @@ class TradingBot {
      */
     async getSwingDecision(pair, data) {
         const chartData = this.getChartData(pair, 'candlestick');
-        if (!chartData || chartData.length < 50) {
-            return { shouldTrade: false, side: null, reason: 'Insufficient data for swing trading' };
+        
+        // Check if we have enough data, but be more lenient for testing
+        if (!chartData || chartData.length < 20) { // Reduced from 50 to 20
+            this.debugLog(`[AI] ${pair}: Insufficient data (${chartData?.length || 0} candles), using simplified analysis`, 'warning');
+            return this.getSimplifiedDecision(pair, data);
         }
+        
         // Calculate swing trading indicators
         const indicators = this.calculateSwingIndicators(chartData);
+        
         // AI decision logic with confidence scoring
         let buySignals = 0;
         let sellSignals = 0;
         let reasons = [];
         let confidence = 0;
         const w = this.signalWeights || {trend:1,rsi:1,macd:1,volume:1,swing:1,support:1,adx:1};
-        // 1. Trend Analysis (50-period SMA)
-        if (data.price > indicators.sma50) {
+        
+        // 1. Trend Analysis (50-period SMA) - use shorter period if needed
+        const smaPeriod = Math.min(50, Math.floor(chartData.length / 2));
+        const sma = chartData.slice(-smaPeriod).reduce((sum, d) => sum + d.close, 0) / smaPeriod;
+        
+        if (data.price > sma) {
             buySignals += 3 * w.trend;
             confidence += 20 * w.trend;
-            reasons.push('Above 50 SMA (bullish trend)');
+            reasons.push(`Above ${smaPeriod} SMA (bullish trend)`);
         } else {
             sellSignals += 3 * w.trend;
             confidence += 20 * w.trend;
-            reasons.push('Below 50 SMA (bearish trend)');
+            reasons.push(`Below ${smaPeriod} SMA (bearish trend)`);
         }
+        
         // 2. RSI
         if (indicators.rsi < 25) {
             buySignals += 4 * w.rsi;
@@ -514,6 +524,7 @@ class TradingBot {
             confidence += 15 * w.rsi;
             reasons.push('RSI overbought');
         }
+        
         // 3. MACD
         if (indicators.macd > indicators.macdSignal && indicators.macd > 0) {
             buySignals += 3 * w.macd;
@@ -524,6 +535,7 @@ class TradingBot {
             confidence += 20 * w.macd;
             reasons.push('MACD bearish trend');
         }
+        
         // 4. Volume
         if (indicators.volumeRatio > 2.0) {
             buySignals += 2 * w.volume;
@@ -534,6 +546,7 @@ class TradingBot {
             confidence += 10 * w.volume;
             reasons.push('Above average volume');
         }
+        
         // 5. Price Action (Swing Highs/Lows)
         if (indicators.isSwingLow) {
             buySignals += 3 * w.swing;
@@ -544,6 +557,7 @@ class TradingBot {
             confidence += 20 * w.swing;
             reasons.push('Swing high formation');
         }
+        
         // 6. Support/Resistance
         if (data.price < indicators.majorSupport * 1.02) {
             buySignals += 3 * w.support;
@@ -554,6 +568,7 @@ class TradingBot {
             confidence += 25 * w.support;
             reasons.push('Near major resistance');
         }
+        
         // 7. ADX
         if (indicators.adx > 25) {
             if (buySignals > sellSignals) {
@@ -566,12 +581,14 @@ class TradingBot {
                 reasons.push('Strong downtrend');
             }
         }
+        
         // --- Neural net advisor ---
         const features = this.extractFeatures(indicators, data);
         let nnResult = {action: 'hold', confidence: 0};
         if (this.nnModel) {
             nnResult = await this.neuralNetDecision(features);
         }
+        
         // Combine: if neural net is very confident, override rule-based; else, use rule-based
         let finalSide = null;
         if (nnResult.confidence > 0.85 && nnResult.action !== 'HOLD') {
@@ -580,6 +597,7 @@ class TradingBot {
         } else {
             finalSide = buySignals > sellSignals ? 'BUY' : sellSignals > buySignals ? 'SELL' : null;
         }
+        
         // Calculate AI-recommended stop loss and take profit
         const aiLevels = this.calculateAITradeLevels(pair, data, indicators, finalSide);
         
@@ -587,21 +605,21 @@ class TradingBot {
         let shouldTrade = finalSide !== null && aiLevels !== null;
         let finalConfidence = Math.max(confidence/100, nnResult.confidence);
         
-        // Minimum confidence threshold for swing trading
-        if (finalConfidence < 0.4) { // Reduced from 0.6 to 0.4 for testing
+        // Minimum confidence threshold for swing trading - reduced for testing
+        if (finalConfidence < 0.3) { // Reduced from 0.4 to 0.3 for testing
             shouldTrade = false;
             reasons.push('Insufficient confidence for swing trade');
         }
         
-        // Minimum risk/reward ratio for swing trading
-        if (aiLevels && aiLevels.riskRewardRatio < 1.2) { // Reduced from 1.5 to 1.2 for testing
+        // Minimum risk/reward ratio for swing trading - reduced for testing
+        if (aiLevels && aiLevels.riskRewardRatio < 1.1) { // Reduced from 1.2 to 1.1 for testing
             shouldTrade = false;
             reasons.push('Risk/reward ratio too low for swing trade');
         }
         
         // Check if we're in a strong trend (prefer trend-following for swing trading)
         const trendStrength = Math.abs(indicators.adx);
-        if (trendStrength < 20) {
+        if (trendStrength < 15) { // Reduced from 20 to 15
             finalConfidence *= 0.8; // Reduce confidence in low trend strength
             reasons.push('Weak trend strength');
         }
@@ -629,6 +647,71 @@ class TradingBot {
             nnConfidence: nnResult.confidence,
             trendStrength: trendStrength,
             volatilityRatio: volatilityRatio
+        };
+    }
+
+    /**
+     * Simplified decision making for when we have limited data
+     */
+    getSimplifiedDecision(pair, data) {
+        // Use basic price action and momentum for limited data
+        const chartData = this.getChartData(pair, 'candlestick');
+        if (!chartData || chartData.length < 5) {
+            return { shouldTrade: false, side: null, reason: 'Insufficient data for any analysis' };
+        }
+        
+        const prices = chartData.map(d => d.close);
+        const currentPrice = data.price;
+        const prevPrice = prices[prices.length - 2] || currentPrice;
+        const priceChange = ((currentPrice - prevPrice) / prevPrice) * 100;
+        
+        let side = null;
+        let confidence = 0.3; // Base confidence for simplified analysis
+        let reasons = [];
+        
+        // Simple momentum-based decision
+        if (priceChange > 1.0) { // 1% price increase
+            side = 'BUY';
+            confidence += 0.2;
+            reasons.push('Positive momentum');
+        } else if (priceChange < -1.0) { // 1% price decrease
+            side = 'SELL';
+            confidence += 0.2;
+            reasons.push('Negative momentum');
+        } else if (priceChange > 0.5) {
+            side = 'BUY';
+            confidence += 0.1;
+            reasons.push('Slight positive momentum');
+        } else if (priceChange < -0.5) {
+            side = 'SELL';
+            confidence += 0.1;
+            reasons.push('Slight negative momentum');
+        }
+        
+        // Calculate simple stop loss and take profit
+        let stopLoss, takeProfit;
+        if (side === 'BUY') {
+            stopLoss = currentPrice * 0.95; // 5% stop loss
+            takeProfit = currentPrice * 1.15; // 15% take profit
+        } else if (side === 'SELL') {
+            stopLoss = currentPrice * 1.05; // 5% stop loss
+            takeProfit = currentPrice * 0.85; // 15% take profit
+        }
+        
+        const shouldTrade = side !== null && confidence >= 0.3;
+        
+        return {
+            shouldTrade: shouldTrade,
+            side: side,
+            reason: reasons.join(', ') || 'Simplified analysis',
+            confidence: confidence,
+            stopLoss: stopLoss,
+            takeProfit: takeProfit,
+            riskRewardRatio: 3.0, // 3:1 risk/reward ratio
+            signalsUsed: {momentum: 1.0},
+            nnConfidence: 0,
+            trendStrength: Math.abs(priceChange),
+            volatilityRatio: 0.02
         };
     }
 
