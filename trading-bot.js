@@ -107,7 +107,7 @@ class TradingBot {
             
             // Fetch 1440 historical candles (24 hours of 1-minute data) for each crypto pair
             if (this.marketType === 'crypto' && window.app && window.app.krakenAPI) {
-                const pairs = ['BTCGBP', 'XRPGBP', 'LINKGBP', 'AAVEGBP', 'FILGBP'];
+                const pairs = Object.keys(window.app.krakenAPI.pairs);
                 for (const pair of pairs) {
                     const krakenPair = window.app.krakenAPI.pairs[pair];
                     if (!krakenPair) {
@@ -172,7 +172,7 @@ class TradingBot {
      */
     initializeChartData() {
         if (this.marketType === 'crypto') {
-            const pairs = ['BTCGBP', 'XRPGBP', 'LINKGBP', 'AAVEGBP', 'FILGBP'];
+            const pairs = window.app && window.app.krakenAPI ? Object.keys(window.app.krakenAPI.pairs) : [];
             pairs.forEach(pair => {
                 this.chartData[pair] = [];
             });
@@ -1581,7 +1581,7 @@ class TradingBot {
         }
 
         this.debugLog('🔄 Reloading historical data for all pairs...', 'info');
-        const pairs = ['BTCGBP', 'XRPGBP', 'LINKGBP', 'AAVEGBP', 'FILGBP'];
+        const pairs = window.app && window.app.krakenAPI ? Object.keys(window.app.krakenAPI.pairs) : [];
         
         for (const pair of pairs) {
             const krakenPair = window.app.krakenAPI.pairs[pair];
@@ -1695,7 +1695,7 @@ class TradingBot {
      */
     async pretrainNeuralNetWithHistory() {
         if (!this.nnModel || !window.app || !window.app.krakenAPI) return;
-        const pairs = ['BTCGBP', 'XRPGBP', 'LINKGBP', 'AAVEGBP', 'FILGBP'];
+        const pairs = Object.keys(window.app.krakenAPI.pairs);
         for (const pair of pairs) {
             // Use Kraken code for each pair
             const krakenPair = window.app.krakenAPI.pairs[pair];

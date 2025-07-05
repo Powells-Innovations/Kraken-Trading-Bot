@@ -26,19 +26,27 @@ class KrakenAPI {
         // Trading pairs mapping - using only verified existing pairs
         this.pairs = {
             'BTCGBP': 'XXBTZGBP',
+            'ETHGBP': 'XETHZGBP',
             'XRPGBP': 'XRPGBP',
             'LINKGBP': 'LINKGBP',
             'AAVEGBP': 'AAVEGBP',
-            'FILGBP': 'FILGBP'
+            'FILGBP': 'FILGBP',
+            'ADAGBP': 'ADAGBP',
+            'DOTGBP': 'DOTGBP',
+            'SOLGBP': 'SOLGBP'
         };
         
         // Pair display names (must match keys above)
         this.pairNames = {
             'BTCGBP': 'BTC/GBP',
+            'ETHGBP': 'ETH/GBP',
             'XRPGBP': 'XRP/GBP',
             'LINKGBP': 'LINK/GBP',
             'AAVEGBP': 'AAVE/GBP',
-            'FILGBP': 'FIL/GBP'
+            'FILGBP': 'FIL/GBP',
+            'ADAGBP': 'ADA/GBP',
+            'DOTGBP': 'DOT/GBP',
+            'SOLGBP': 'SOL/GBP'
         };
     }
 
@@ -191,16 +199,8 @@ class KrakenAPI {
                 throw new Error('Trading pairs validation failed');
             }
             
-            // Use the top 5 Kraken GBP pairs with correct Kraken codes
-            const workingPairs = {
-                'BTCGBP': 'XXBTZGBP',
-                'XRPGBP': 'XRPGBP',
-                'LINKGBP': 'LINKGBP',
-                'AAVEGBP': 'AAVEGBP',
-                'FILGBP': 'FILGBP'
-            };
-            
-            const pairString = Object.values(workingPairs).join(',');
+            // Use all configured pairs
+            const pairString = Object.values(this.pairs).join(',');
             this.debugLog(`Requesting pairs: ${pairString}`, 'api');
             
             const data = await this.makeRequest('/Ticker', { pair: pairString });
@@ -224,16 +224,8 @@ class KrakenAPI {
         this.debugLog('Processing ticker data...', 'api');
         const processedData = {};
         
-        // Use the top 5 Kraken GBP pairs with correct Kraken codes
-        const workingPairs = {
-            'BTCGBP': 'XXBTZGBP',
-            'XRPGBP': 'XRPGBP',
-            'LINKGBP': 'LINKGBP',
-            'AAVEGBP': 'AAVEGBP',
-            'FILGBP': 'FILGBP'
-        };
-        
-        for (const [displayPair, krakenPair] of Object.entries(workingPairs)) {
+        // Use all configured pairs
+        for (const [displayPair, krakenPair] of Object.entries(this.pairs)) {
             const tickerData = rawData[krakenPair];
             
             if (tickerData) {

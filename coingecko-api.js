@@ -19,8 +19,7 @@ class CoinGeckoAPI {
             'ETHGBP': 'ethereum',
             'ADAGBP': 'cardano',
             'DOTGBP': 'polkadot',
-            'SOLGBP': 'solana',
-            'MATICGBP': 'matic-network'
+            'SOLGBP': 'solana'
         };
         
         this.coinNames = {
@@ -32,8 +31,7 @@ class CoinGeckoAPI {
             'ETHGBP': 'Ethereum',
             'ADAGBP': 'Cardano',
             'DOTGBP': 'Polkadot',
-            'SOLGBP': 'Solana',
-            'MATICGBP': 'Polygon'
+            'SOLGBP': 'Solana'
         };
     }
 
