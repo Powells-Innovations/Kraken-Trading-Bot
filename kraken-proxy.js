@@ -127,7 +127,6 @@ app.post('/api/kraken/buy', async (req, res) => {
     if (price) postData.price = price.toString();
     
     const signature = createSignature(endpoint, postData, apiSecret);
-    postData.nonce = nonce;
     
     const response = await fetch(`${KRAKEN_BASE_URL}${endpoint}`, {
       method: 'POST',
@@ -167,7 +166,6 @@ app.post('/api/kraken/sell', async (req, res) => {
     if (price) postData.price = price.toString();
     
     const signature = createSignature(endpoint, postData, apiSecret);
-    postData.nonce = nonce;
     
     const response = await fetch(`${KRAKEN_BASE_URL}${endpoint}`, {
       method: 'POST',
@@ -411,7 +409,7 @@ app.post('/api/yahoo/quotes', async (req, res) => {
   }
 });
 
-app.listen(PORT, () => {
+const server = app.listen(PORT, () => {
   console.log(`Kraken proxy server running on http://localhost:${PORT}`);
   console.log('✅ Live trading endpoints added:');
   console.log('   - POST /api/kraken/balance - Get account balance');
@@ -421,4 +419,21 @@ app.listen(PORT, () => {
   console.log('   - POST /api/kraken/cancel-order - Cancel order');
   console.log('   - POST /api/kraken/closed-orders - Get trade history');
   console.log('   - POST /api/kraken/test-credentials - Test API credentials');
+});
+
+// Graceful shutdown handling
+process.on('SIGTERM', () => {
+  console.log('SIGTERM signal received: closing HTTP server');
+  server.close(() => {
+    console.log('HTTP server closed');
+    process.exit(0);
+  });
+});
+
+process.on('SIGINT', () => {
+  console.log('SIGINT signal received: closing HTTP server');
+  server.close(() => {
+    console.log('HTTP server closed');
+    process.exit(0);
+  });
 }); 
