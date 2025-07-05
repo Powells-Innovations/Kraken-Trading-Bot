@@ -26,13 +26,13 @@ class TradingBot {
         // Trading settings
         this.settings = {
             maxInvestment: 50,
-            takeProfit: 30, // 30% enforced
-            stopLoss: 10,   // 10% enforced
-            tradeFrequency: 'aggressive', // Changed to aggressive for testing
-            maxActiveTrades: 15, // Increased from 10 to 15 for testing
-            maxRiskPerTrade: 0.10, // 10% max risk per trade
-            maxTotalRisk: 0.30, // 30% max total risk across all trades
-            cooldownMinutes: 3 // Reduced to 3 minutes for testing
+            takeProfit: 15,    // 15% take profit for swing trading
+            stopLoss: 5,       // 5% stop loss (dynamic stops will override)
+            tradeFrequency: 'moderate', // Swing trading is moderate frequency
+            maxActiveTrades: 6,  // Reduced to 6 for better risk management
+            maxRiskPerTrade: 0.02, // 2% max risk per trade (professional standard)
+            maxTotalRisk: 0.10,    // 10% max total risk across all trades
+            cooldownMinutes: 60    // 1 hour cooldown between trades on same pair
         };
         
         // Trading statistics
@@ -114,15 +114,15 @@ class TradingBot {
                         this.debugLog(`[INIT] No Kraken pair mapping found for ${pair}`, 'warning');
                         continue;
                     }
-                    this.debugLog(`[INIT] Fetching 1440 historical candles for ${pair} (${krakenPair})...`, 'info');
+                    this.debugLog(`[INIT] Fetching 2880 historical candles for ${pair} (${krakenPair})...`, 'info');
                     try {
-                        const ohlc = await window.app.krakenAPI.getOHLCData(krakenPair, 1, null, 1); // 1-minute candles, 1 day
-                        if (ohlc && ohlc.length >= 1440) {
-                            this.chartData[pair] = ohlc.slice(-1440); // keep last 1440 candles
+                        const ohlc = await window.app.krakenAPI.getOHLCData(krakenPair, 1, null, 2); // 1-minute candles, 2 days
+                        if (ohlc && ohlc.length >= 2880) {
+                            this.chartData[pair] = ohlc.slice(-2880); // keep last 2880 candles
                             this.debugLog(`[INIT] ✅ ${pair} candles loaded: ${this.chartData[pair].length}`);
                         } else if (ohlc && ohlc.length >= 100) {
                             this.chartData[pair] = ohlc.slice(-100); // fallback to 100 if not enough data
-                            this.debugLog(`[INIT] ⚠️ ${pair} limited data: ${this.chartData[pair].length} candles (wanted 1440)`, 'warning');
+                            this.debugLog(`[INIT] ⚠️ ${pair} limited data: ${this.chartData[pair].length} candles (wanted 2880)`, 'warning');
                         } else {
                             this.debugLog(`[INIT] ⚠️ ${pair} insufficient data: ${ohlc?.length || 0} candles`, 'warning');
                         }
@@ -300,9 +300,9 @@ class TradingBot {
                 };
                 this.chartData[pair].push(newCandle);
                 
-                // Keep only last 1440 candles (24 hours of 1-minute candles)
-                if (this.chartData[pair].length > 1440) {
-                    this.chartData[pair] = this.chartData[pair].slice(-1440);
+                // Keep last 2880 candles (48 hours of 1-minute candles) for swing trading
+                if (this.chartData[pair].length > 2880) {
+                    this.chartData[pair] = this.chartData[pair].slice(-2880);
                 }
                 
                 this.debugLog(`[updateChartData] ${pair}: O:${newCandle.open.toFixed(4)} H:${newCandle.high.toFixed(4)} L:${newCandle.low.toFixed(4)} C:${newCandle.close.toFixed(4)}`, 'info');
@@ -408,351 +408,472 @@ class TradingBot {
      * Swing Trading Strategy - Hold positions for hours to days
      */
     async swingTrade(tickerData) {
-        // Debug log: show number of candles for each pair before trading decisions
-        Object.keys(this.chartData).forEach(pair => {
-            this.debugLog(`[SWING] ${pair} candles available: ${this.chartData[pair]?.length}`);
-        });
+        // Debug log: show data availability
+        const dataStats = Object.keys(this.chartData).map(pair => 
+            `${pair}: ${this.chartData[pair]?.length || 0} candles`
+        ).join(', ');
+        this.debugLog(`[SWING] Data available: ${dataStats}`, 'info');
         
-        // Swing trading: Check for new opportunities every 2 minutes (more aggressive for testing)
-        const nowMinute = Math.floor(Date.now() / 120000); // 2 minutes
+        // Swing trading: Check for opportunities every 15 minutes
+        const nowMinute = Math.floor(Date.now() / (15 * 60000)); // 15 minutes
         if (nowMinute !== this.lastTradeMinute) {
             this.tradeCounter = 0;
             this.lastTradeMinute = nowMinute;
+            this.debugLog('[SWING] New 15-minute trading window started', 'info');
         }
         
         // Get total active trades count
-        const totalActiveTrades = Object.values(this.activeTrades).reduce((sum, trades) => sum + (Array.isArray(trades) ? trades.length : 0), 0);
+        const totalActiveTrades = Object.values(this.activeTrades).reduce((sum, trades) => 
+            sum + (Array.isArray(trades) ? trades.length : 0), 0
+        );
         
         // Don't trade if we have too many active trades
         if (totalActiveTrades >= this.settings.maxActiveTrades) {
-            this.debugLog(`[SWING] Skipping trade analysis - max active trades reached (${totalActiveTrades}/${this.settings.maxActiveTrades})`, 'warning');
+            this.debugLog(`[SWING] Max active trades reached (${totalActiveTrades}/${this.settings.maxActiveTrades})`, 'warning');
             return;
         }
         
-        // --- Batch all getSwingDecision calls in parallel ---
+        // Analyze all pairs in parallel
         const pairs = Object.keys(tickerData);
-        const decisionPromises = pairs.map(pair => {
+        const decisionPromises = pairs.map(async pair => {
             const data = tickerData[pair];
             if (!data || !data.price || data.price <= 0) return null;
-            return this.getSwingDecision(pair, data).then(decision => ({ pair, data, decision }));
+            
+            try {
+                const decision = await this.getSwingDecision(pair, data);
+                return { pair, data, decision };
+            } catch (error) {
+                this.debugLog(`[SWING] Error analyzing ${pair}: ${error.message}`, 'error');
+                return null;
+            }
         });
+        
         const results = (await Promise.all(decisionPromises)).filter(Boolean);
         
-        // Debug log for every pair
-        for (const r of results) {
-            this.debugLog(`[AI] ${r.pair}: side=${r.decision.side} shouldTrade=${r.decision.shouldTrade} conf=${(r.decision.confidence*100).toFixed(1)}% reason=${r.decision.reason}`,'info');
-        }
+        // Log summary of analysis
+        const summary = {
+            analyzed: results.length,
+            shouldTrade: results.filter(r => r.decision.shouldTrade).length,
+            canTrade: results.filter(r => r.decision.shouldTrade && this.canTrade(r.pair)).length,
+            buySignals: results.filter(r => r.decision.side === 'BUY').length,
+            sellSignals: results.filter(r => r.decision.side === 'SELL').length
+        };
         
-        // Additional debug logging
-        this.debugLog(`[SWING] Total pairs analyzed: ${results.length}`, 'info');
-        this.debugLog(`[SWING] Pairs with shouldTrade=true: ${results.filter(r => r.decision.shouldTrade).length}`, 'info');
-        this.debugLog(`[SWING] Pairs that can trade: ${results.filter(r => r.decision.shouldTrade && this.canTrade(r.pair)).length}`, 'info');
+        this.debugLog(`[SWING] Analysis complete: ${JSON.stringify(summary)}`, 'info');
         
-        // Sort opportunities by confidence and risk/reward ratio
+        // Sort opportunities by confidence and risk/reward
         const opportunities = results
             .filter(r => r.decision.shouldTrade && this.canTrade(r.pair))
             .sort((a, b) => {
-                // Prioritize by confidence first, then by risk/reward ratio
-                if (Math.abs(a.decision.confidence - b.decision.confidence) > 0.1) {
-                    return b.decision.confidence - a.decision.confidence;
-                }
+                // First sort by confidence
+                const confDiff = b.decision.confidence - a.decision.confidence;
+                if (Math.abs(confDiff) > 0.1) return confDiff;
+                
+                // Then by risk/reward ratio
                 return (b.decision.riskRewardRatio || 0) - (a.decision.riskRewardRatio || 0);
             });
         
-        // Only trade the best opportunity (if any) and respect trade limits
-        if (opportunities.length > 0 && this.tradeCounter < 5) { // Increased from 3 to 5 for testing
-            const best = opportunities[0];
+        // Log top opportunities
+        if (opportunities.length > 0) {
+            this.debugLog(`[SWING] Top opportunities:`, 'info');
+            opportunities.slice(0, 3).forEach((opp, i) => {
+                const d = opp.decision;
+                this.debugLog(
+                    `  ${i+1}. ${opp.pair}: ${d.side} | Conf: ${(d.confidence*100).toFixed(1)}% | ` +
+                    `R/R: ${d.riskRewardRatio.toFixed(2)} | ${d.reason}`, 
+                    'info'
+                );
+            });
+        }
+        
+        // Execute trades (max 2 per window for swing trading)
+        const maxTradesPerWindow = 2;
+        let tradesExecuted = 0;
+        
+        for (const opportunity of opportunities) {
+            if (tradesExecuted >= maxTradesPerWindow || this.tradeCounter >= 5) break;
             
-            // Additional safety check: ensure we're not over-risking
-            const tradeRisk = this.calculateTradeRisk(best.pair, best.data.price, best.decision.stopLoss);
-            this.debugLog(`[SWING] Trade risk for ${best.pair}: ${tradeRisk.toFixed(1)}% (max: ${this.settings.maxRiskPerTrade * 100}%)`, 'info');
+            const { pair, data, decision } = opportunity;
             
-            if (tradeRisk <= this.settings.maxRiskPerTrade * 100) {
-                this.debugLog(`[SWING] Attempting to execute trade for ${best.pair}...`, 'info');
-                const executionResult = await this.executeTrade(best.pair, best.decision.side, best.data.price, `AI Swing: ${best.decision.reason}`, best.decision.stopLoss, best.decision.takeProfit, best.decision.confidence);
-                this.debugLog(`[SWING] Execute trade result for ${best.pair}: ${executionResult}`, 'info');
-                
-                if (executionResult) {
-                    this.tradeCounter++;
-                    this.debugLog(`🤖 AI Trade: ${best.decision.side} ${best.pair} | Confidence: ${(best.decision.confidence*100).toFixed(1)}% | R/R: ${best.decision.riskRewardRatio}:1 | SL: £${best.decision.stopLoss} | TP: £${best.decision.takeProfit}`, 'success');
-                    
-                    // --- For learning: log signals used ---
-                    if (!this.signalHistory) this.signalHistory = [];
-                    this.signalHistory.push({
-                        pair: best.pair,
-                        time: Date.now(),
-                        signals: best.decision,
-                        result: null // will be filled on closeTrade
-                    });
-                }
-            } else {
-                this.debugLog(`[SWING] Skipping ${best.pair} - risk too high for current position`, 'warning');
+            // Final risk check
+            const tradeRisk = this.calculateTradeRisk(pair, data.price, decision.stopLoss);
+            if (tradeRisk > this.settings.maxRiskPerTrade * 100) {
+                this.debugLog(`[SWING] Skipping ${pair} - risk too high (${tradeRisk.toFixed(1)}%)`, 'warning');
+                continue;
             }
-        } else if (opportunities.length === 0) {
-            this.debugLog(`[SWING] No suitable trading opportunities found`, 'info');
+            
+            // Execute trade
+            this.debugLog(`[SWING] Executing trade for ${pair}...`, 'info');
+            const executionResult = await this.executeTrade(
+                pair, 
+                decision.side, 
+                data.price, 
+                `AI Swing: ${decision.reason}`, 
+                decision.stopLoss, 
+                decision.takeProfit, 
+                decision.confidence
+            );
+            
+            if (executionResult) {
+                tradesExecuted++;
+                this.tradeCounter++;
+                
+                // Log detailed trade info
+                this.debugLog(
+                    `🤖 AI SWING TRADE EXECUTED:\n` +
+                    `   Pair: ${pair}\n` +
+                    `   Side: ${decision.side}\n` +
+                    `   Confidence: ${(decision.confidence*100).toFixed(1)}%\n` +
+                    `   Risk/Reward: ${decision.riskRewardRatio.toFixed(2)}:1\n` +
+                    `   Stop Loss: £${decision.stopLoss.toFixed(4)}\n` +
+                    `   Take Profit: £${decision.takeProfit.toFixed(4)}\n` +
+                    `   Market Regime: ${decision.marketRegime || 'Unknown'}\n` +
+                    `   Patterns: ${decision.patterns ? 
+                        (decision.patterns.bullish.concat(decision.patterns.bearish)
+                            .map(p => p.name).join(', ') || 'None') : 'None'}`,
+                    'success'
+                );
+                
+                // Store decision data for learning
+                if (!this.decisionHistory) this.decisionHistory = [];
+                this.decisionHistory.push({
+                    pair: pair,
+                    time: Date.now(),
+                    decision: decision,
+                    entryPrice: data.price,
+                    result: null // Will be filled on trade close
+                });
+            }
+        }
+        
+        if (opportunities.length === 0) {
+            this.debugLog(`[SWING] No suitable opportunities found in this cycle`, 'info');
+        } else if (tradesExecuted === 0) {
+            this.debugLog(`[SWING] Had ${opportunities.length} opportunities but none were executed`, 'warning');
         }
     }
 
     /**
-     * AI Swing Trading Decision Making - Complete strategy with dynamic SL/TP
+     * AI Swing Trading Decision Making - Advanced strategy with multi-timeframe analysis
      */
     async getSwingDecision(pair, data) {
         const chartData = this.getChartData(pair, 'candlestick');
         
-        // Check if we have enough data, but be more lenient for testing
-        if (!chartData || chartData.length < 10) { // Reduced from 20 to 10
+        // Need at least 200 candles for proper analysis
+        if (!chartData || chartData.length < 200) {
             this.debugLog(`[AI] ${pair}: Insufficient data (${chartData?.length || 0} candles), using simplified analysis`, 'warning');
             return this.getSimplifiedDecision(pair, data);
         }
         
-        // Calculate swing trading indicators
-        const indicators = this.calculateSwingIndicators(chartData);
+        // Calculate comprehensive indicators
+        const indicators = this.calculateAdvancedIndicators(chartData);
+        const marketRegime = this.detectMarketRegime(chartData, indicators);
+        const patterns = this.detectPatterns(chartData);
+        const multiTimeframe = await this.multiTimeframeAnalysis(pair, data);
         
-        // AI decision logic with confidence scoring
-        let buySignals = 0;
-        let sellSignals = 0;
-        let reasons = [];
+        // Initialize scoring system
+        let buyScore = 0;
+        let sellScore = 0;
         let confidence = 0;
-        const w = this.signalWeights || {trend:1,rsi:1,macd:1,volume:1,swing:1,support:1,adx:1};
+        let reasons = [];
         
-        // 1. Trend Analysis (50-period SMA) - use shorter period if needed
-        const smaPeriod = Math.min(50, Math.floor(chartData.length / 2));
-        const sma = chartData.slice(-smaPeriod).reduce((sum, d) => sum + d.close, 0) / smaPeriod;
-        
-        if (data.price > sma) {
-            buySignals += 3 * w.trend;
-            confidence += 20 * w.trend;
-            reasons.push(`Above ${smaPeriod} SMA (bullish trend)`);
-        } else {
-            sellSignals += 3 * w.trend;
-            confidence += 20 * w.trend;
-            reasons.push(`Below ${smaPeriod} SMA (bearish trend)`);
-        }
-        
-        // 2. RSI
-        if (indicators.rsi < 25) {
-            buySignals += 4 * w.rsi;
-            confidence += 25 * w.rsi;
-            reasons.push('RSI deeply oversold');
-        } else if (indicators.rsi > 75) {
-            sellSignals += 4 * w.rsi;
-            confidence += 25 * w.rsi;
-            reasons.push('RSI strongly overbought');
-        } else if (indicators.rsi < 35) {
-            buySignals += 2 * w.rsi;
-            confidence += 15 * w.rsi;
-            reasons.push('RSI oversold');
-        } else if (indicators.rsi > 65) {
-            sellSignals += 2 * w.rsi;
-            confidence += 15 * w.rsi;
-            reasons.push('RSI overbought');
-        }
-        
-        // 3. MACD
-        if (indicators.macd > indicators.macdSignal && indicators.macd > 0) {
-            buySignals += 3 * w.macd;
-            confidence += 20 * w.macd;
-            reasons.push('MACD bullish trend');
-        } else if (indicators.macd < indicators.macdSignal && indicators.macd < 0) {
-            sellSignals += 3 * w.macd;
-            confidence += 20 * w.macd;
-            reasons.push('MACD bearish trend');
-        }
-        
-        // 4. Volume
-        if (indicators.volumeRatio > 2.0) {
-            buySignals += 2 * w.volume;
-            confidence += 15 * w.volume;
-            reasons.push('High volume breakout');
-        } else if (indicators.volumeRatio > 1.5) {
-            buySignals += 1 * w.volume;
-            confidence += 10 * w.volume;
-            reasons.push('Above average volume');
-        }
-        
-        // 5. Price Action (Swing Highs/Lows)
-        if (indicators.isSwingLow) {
-            buySignals += 3 * w.swing;
-            confidence += 20 * w.swing;
-            reasons.push('Swing low formation');
-        } else if (indicators.isSwingHigh) {
-            sellSignals += 3 * w.swing;
-            confidence += 20 * w.swing;
-            reasons.push('Swing high formation');
-        }
-        
-        // 6. Support/Resistance
-        if (data.price < indicators.majorSupport * 1.02) {
-            buySignals += 3 * w.support;
-            confidence += 25 * w.support;
-            reasons.push('Near major support');
-        } else if (data.price > indicators.majorResistance * 0.98) {
-            sellSignals += 3 * w.support;
-            confidence += 25 * w.support;
-            reasons.push('Near major resistance');
-        }
-        
-        // 7. ADX
-        if (indicators.adx > 25) {
-            if (buySignals > sellSignals) {
-                buySignals += 2 * w.adx;
-                confidence += 15 * w.adx;
-                reasons.push('Strong uptrend');
-            } else if (sellSignals > buySignals) {
-                sellSignals += 2 * w.adx;
-                confidence += 15 * w.adx;
-                reasons.push('Strong downtrend');
+        // 1. Market Regime Analysis (25% weight)
+        if (marketRegime.type === 'strong_uptrend') {
+            buyScore += 25;
+            confidence += 0.25;
+            reasons.push('Strong uptrend detected');
+        } else if (marketRegime.type === 'strong_downtrend') {
+            sellScore += 25;
+            confidence += 0.25;
+            reasons.push('Strong downtrend detected');
+        } else if (marketRegime.type === 'uptrend') {
+            buyScore += 15;
+            confidence += 0.15;
+            reasons.push('Uptrend');
+        } else if (marketRegime.type === 'downtrend') {
+            sellScore += 15;
+            confidence += 0.15;
+            reasons.push('Downtrend');
+        } else if (marketRegime.type === 'ranging') {
+            // Range trading logic
+            if (data.price <= indicators.bollingerLower * 1.02) {
+                buyScore += 20;
+                confidence += 0.20;
+                reasons.push('Near range bottom');
+            } else if (data.price >= indicators.bollingerUpper * 0.98) {
+                sellScore += 20;
+                confidence += 0.20;
+                reasons.push('Near range top');
             }
         }
         
-        // --- Neural net advisor ---
-        const features = this.extractFeatures(indicators, data);
-        let nnResult = {action: 'hold', confidence: 0};
+        // 2. Technical Indicators Confluence (30% weight)
+        const technicalScore = this.calculateTechnicalScore(indicators, data.price);
+        if (technicalScore.signal === 'BUY') {
+            buyScore += technicalScore.strength * 30;
+            confidence += technicalScore.confidence * 0.30;
+            reasons.push(technicalScore.reason);
+        } else if (technicalScore.signal === 'SELL') {
+            sellScore += technicalScore.strength * 30;
+            confidence += technicalScore.confidence * 0.30;
+            reasons.push(technicalScore.reason);
+        }
+        
+        // 3. Pattern Recognition (20% weight)
+        if (patterns.bullish.length > 0) {
+            const patternStrength = patterns.bullish[0].strength || 0.7;
+            buyScore += patternStrength * 20;
+            confidence += patternStrength * 0.20;
+            reasons.push(`Bullish pattern: ${patterns.bullish[0].name}`);
+        } else if (patterns.bearish.length > 0) {
+            const patternStrength = patterns.bearish[0].strength || 0.7;
+            sellScore += patternStrength * 20;
+            confidence += patternStrength * 0.20;
+            reasons.push(`Bearish pattern: ${patterns.bearish[0].name}`);
+        }
+        
+        // 4. Multi-timeframe Confluence (15% weight)
+        if (multiTimeframe.signal === 'BUY') {
+            buyScore += multiTimeframe.strength * 15;
+            confidence += multiTimeframe.confidence * 0.15;
+            reasons.push('Multi-TF bullish');
+        } else if (multiTimeframe.signal === 'SELL') {
+            sellScore += multiTimeframe.strength * 15;
+            confidence += multiTimeframe.confidence * 0.15;
+            reasons.push('Multi-TF bearish');
+        }
+        
+        // 5. Volume Analysis (10% weight)
+        const volumeSignal = this.analyzeVolume(chartData, indicators);
+        if (volumeSignal.signal === 'BUY') {
+            buyScore += volumeSignal.strength * 10;
+            confidence += volumeSignal.confidence * 0.10;
+            reasons.push(volumeSignal.reason);
+        } else if (volumeSignal.signal === 'SELL') {
+            sellScore += volumeSignal.strength * 10;
+            confidence += volumeSignal.confidence * 0.10;
+            reasons.push(volumeSignal.reason);
+        }
+        
+        // Machine Learning Enhancement
         if (this.nnModel) {
-            nnResult = await this.neuralNetDecision(features);
-        }
-        
-        // Combine: if neural net is very confident, override rule-based; else, use rule-based
-        let finalSide = null;
-        if (nnResult.confidence > 0.85 && nnResult.action !== 'HOLD') {
-            finalSide = nnResult.action;
-            reasons.unshift('NeuralNet override');
-        } else {
-            finalSide = buySignals > sellSignals ? 'BUY' : sellSignals > buySignals ? 'SELL' : null;
-        }
-        
-        // Calculate AI-recommended stop loss and take profit
-        const aiLevels = this.calculateAITradeLevels(pair, data, indicators, finalSide);
-        
-        // Fallback to simple levels if AI calculation fails
-        let stopLoss, takeProfit, riskRewardRatio;
-        if (aiLevels) {
-            stopLoss = aiLevels.stopLoss;
-            takeProfit = aiLevels.takeProfit;
-            riskRewardRatio = aiLevels.riskRewardRatio;
-        } else {
-            // Simple fallback levels
-            if (finalSide === 'BUY') {
-                stopLoss = data.price * 0.95; // 5% stop loss
-                takeProfit = data.price * 1.15; // 15% take profit
-            } else if (finalSide === 'SELL') {
-                stopLoss = data.price * 1.05; // 5% stop loss
-                takeProfit = data.price * 0.85; // 15% take profit
+            const features = this.extractAdvancedFeatures(indicators, data, marketRegime, patterns);
+            const nnResult = await this.neuralNetDecision(features);
+            
+            if (nnResult.confidence > 0.7) {
+                if (nnResult.action === 'BUY') {
+                    buyScore += nnResult.confidence * 20;
+                    confidence = Math.max(confidence, nnResult.confidence);
+                    reasons.unshift('AI Neural Net: Strong Buy');
+                } else if (nnResult.action === 'SELL') {
+                    sellScore += nnResult.confidence * 20;
+                    confidence = Math.max(confidence, nnResult.confidence);
+                    reasons.unshift('AI Neural Net: Strong Sell');
+                }
             }
-            riskRewardRatio = 3.0; // 3:1 risk/reward ratio
         }
         
-        // Additional swing trading filters
+        // Determine final decision
+        const scoreDiff = Math.abs(buyScore - sellScore);
+        let finalSide = null;
+        
+        if (buyScore > sellScore && scoreDiff >= 20) {
+            finalSide = 'BUY';
+        } else if (sellScore > buyScore && scoreDiff >= 20) {
+            finalSide = 'SELL';
+        }
+        
+        // Calculate dynamic stop loss and take profit based on market conditions
+        const riskParams = this.calculateDynamicRiskParameters(
+            pair, data, indicators, marketRegime, finalSide
+        );
+        
+        // Additional filters for swing trading
         let shouldTrade = finalSide !== null;
-        let finalConfidence = Math.max(confidence/100, nnResult.confidence);
         
-        // Minimum confidence threshold for swing trading - further reduced for testing
-        if (finalConfidence < 0.2) { // Reduced from 0.3 to 0.2 for testing
+        // Market quality filters
+        if (indicators.atr < data.price * 0.002) { // Less than 0.2% ATR
             shouldTrade = false;
-            reasons.push('Insufficient confidence for swing trade');
+            reasons.push('Market too quiet');
         }
         
-        // Minimum risk/reward ratio for swing trading - further reduced for testing
-        if (riskRewardRatio < 1.0) { // Use local variable instead of aiLevels
+        if (marketRegime.volatility > 3.0) { // Extreme volatility
+            confidence *= 0.7;
+            reasons.push('Extreme volatility');
+        }
+        
+        // Time-based filters
+        const hour = new Date().getUTCHours();
+        if (hour >= 21 || hour <= 7) { // Low liquidity hours
+            confidence *= 0.8;
+            reasons.push('Low liquidity period');
+        }
+        
+        // Risk/Reward validation
+        if (riskParams.riskRewardRatio < 1.5) {
             shouldTrade = false;
-            reasons.push('Risk/reward ratio too low for swing trade');
+            reasons.push('Poor risk/reward');
         }
         
-        // Check if we're in a strong trend (prefer trend-following for swing trading)
-        const trendStrength = Math.abs(indicators.adx);
-        if (trendStrength < 10) { // Reduced from 15 to 10
-            finalConfidence *= 0.9; // Reduce confidence less in low trend strength
-            reasons.push('Weak trend strength');
-        }
-        
-        // Market volatility check (avoid extremely volatile or stagnant markets)
-        const atr = this.calculateATR(chartData, 14);
-        const volatilityRatio = atr / data.price;
-        if (volatilityRatio > 0.08) { // More than 8% volatility (increased threshold)
-            finalConfidence *= 0.9; // Reduce confidence in high volatility
-            reasons.push('High volatility');
-        } else if (volatilityRatio < 0.005) { // Less than 0.5% volatility (reduced threshold)
-            finalConfidence *= 0.8; // Reduce confidence less in low volatility
-            reasons.push('Low volatility');
-        }
+        // Final confidence adjustment
+        confidence = Math.min(confidence, 0.95); // Cap at 95%
+        confidence = Math.max(confidence, 0.1); // Floor at 10%
         
         return {
-            shouldTrade: shouldTrade,
+            shouldTrade: shouldTrade && confidence >= 0.4,
             side: finalSide,
             reason: reasons.slice(0, 3).join(', '),
-            confidence: finalConfidence,
-            stopLoss: stopLoss,
-            takeProfit: takeProfit,
-            riskRewardRatio: riskRewardRatio,
-            signalsUsed: {trend: w.trend, rsi: w.rsi, macd: w.macd, volume: w.volume, swing: w.swing, support: w.support, adx: w.adx},
-            nnConfidence: nnResult.confidence,
-            trendStrength: trendStrength,
-            volatilityRatio: volatilityRatio
+            confidence: confidence,
+            stopLoss: riskParams.stopLoss,
+            takeProfit: riskParams.takeProfit,
+            riskRewardRatio: riskParams.riskRewardRatio,
+            marketRegime: marketRegime.type,
+            technicalScore: technicalScore,
+            patterns: patterns,
+            multiTimeframe: multiTimeframe,
+            scores: { buy: buyScore, sell: sellScore }
         };
     }
 
     /**
-     * Simplified decision making for when we have limited data
+     * Simplified but still intelligent decision making for limited data
      */
     getSimplifiedDecision(pair, data) {
-        // Use basic price action and momentum for limited data
         const chartData = this.getChartData(pair, 'candlestick');
-        if (!chartData || chartData.length < 5) {
-            return { shouldTrade: false, side: null, reason: 'Insufficient data for any analysis' };
+        if (!chartData || chartData.length < 20) {
+            return { 
+                shouldTrade: false, 
+                side: null, 
+                reason: 'Insufficient data for analysis',
+                confidence: 0
+            };
         }
         
         const prices = chartData.map(d => d.close);
+        const highs = chartData.map(d => d.high);
+        const lows = chartData.map(d => d.low);
+        const volumes = chartData.map(d => d.volume || 1000);
         const currentPrice = data.price;
-        const prevPrice = prices[prices.length - 2] || currentPrice;
-        const priceChange = ((currentPrice - prevPrice) / prevPrice) * 100;
         
-        let side = null;
-        let confidence = 0.3; // Base confidence for simplified analysis
+        // Calculate what we can with limited data
+        const sma = prices.reduce((a, b) => a + b, 0) / prices.length;
+        const pricePosition = (currentPrice - sma) / sma;
+        
+        // Simple RSI
+        const rsi = this.calculateRSI(prices, Math.min(14, prices.length - 1));
+        
+        // Price momentum
+        const momentum5 = prices.length >= 5 ? 
+            ((currentPrice - prices[prices.length - 5]) / prices[prices.length - 5]) * 100 : 0;
+        const momentum10 = prices.length >= 10 ? 
+            ((currentPrice - prices[prices.length - 10]) / prices[prices.length - 10]) * 100 : 0;
+        
+        // Volume analysis
+        const currentVolume = volumes[volumes.length - 1];
+        const avgVolume = volumes.reduce((a, b) => a + b, 0) / volumes.length;
+        const volumeRatio = currentVolume / avgVolume;
+        
+        // Support/Resistance
+        const recentHigh = Math.max(...highs.slice(-20));
+        const recentLow = Math.min(...lows.slice(-20));
+        const range = recentHigh - recentLow;
+        const positionInRange = (currentPrice - recentLow) / range;
+        
+        // Scoring system
+        let buyScore = 0;
+        let sellScore = 0;
+        let confidence = 0.3; // Base confidence for simplified
         let reasons = [];
         
-        // Simple momentum-based decision - more aggressive
-        if (priceChange > 0.5) { // 0.5% price increase (reduced from 1.0%)
-            side = 'BUY';
-            confidence += 0.3;
-            reasons.push('Positive momentum');
-        } else if (priceChange < -0.5) { // 0.5% price decrease (reduced from 1.0%)
-            side = 'SELL';
-            confidence += 0.3;
-            reasons.push('Negative momentum');
-        } else if (priceChange > 0.2) {
-            side = 'BUY';
-            confidence += 0.2;
-            reasons.push('Slight positive momentum');
-        } else if (priceChange < -0.2) {
-            side = 'SELL';
-            confidence += 0.2;
-            reasons.push('Slight negative momentum');
+        // Trend analysis
+        if (pricePosition > 0.02) {
+            buyScore += 20;
+            reasons.push('Above average price');
+        } else if (pricePosition < -0.02) {
+            sellScore += 20;
+            reasons.push('Below average price');
         }
         
-        // Calculate simple stop loss and take profit
+        // RSI
+        if (rsi < 30) {
+            buyScore += 30;
+            confidence += 0.2;
+            reasons.push('RSI oversold');
+        } else if (rsi > 70) {
+            sellScore += 30;
+            confidence += 0.2;
+            reasons.push('RSI overbought');
+        } else if (rsi < 40) {
+            buyScore += 15;
+            confidence += 0.1;
+        } else if (rsi > 60) {
+            sellScore += 15;
+            confidence += 0.1;
+        }
+        
+        // Momentum
+        if (momentum5 > 2 && momentum10 > 3) {
+            buyScore += 25;
+            confidence += 0.15;
+            reasons.push('Strong upward momentum');
+        } else if (momentum5 < -2 && momentum10 < -3) {
+            sellScore += 25;
+            confidence += 0.15;
+            reasons.push('Strong downward momentum');
+        }
+        
+        // Volume confirmation
+        if (volumeRatio > 1.5) {
+            if (momentum5 > 0) {
+                buyScore += 15;
+                reasons.push('Volume confirms up move');
+            } else if (momentum5 < 0) {
+                sellScore += 15;
+                reasons.push('Volume confirms down move');
+            }
+            confidence += 0.1;
+        }
+        
+        // Position in range
+        if (positionInRange < 0.2) {
+            buyScore += 20;
+            reasons.push('Near range bottom');
+        } else if (positionInRange > 0.8) {
+            sellScore += 20;
+            reasons.push('Near range top');
+        }
+        
+        // Determine decision
+        let side = null;
+        if (buyScore > sellScore && buyScore >= 50) {
+            side = 'BUY';
+        } else if (sellScore > buyScore && sellScore >= 50) {
+            side = 'SELL';
+        }
+        
+        // Calculate simple risk parameters
+        const atr = this.calculateATR(chartData, Math.min(14, chartData.length - 1));
         let stopLoss, takeProfit;
+        
         if (side === 'BUY') {
-            stopLoss = currentPrice * 0.95; // 5% stop loss
-            takeProfit = currentPrice * 1.15; // 15% take profit
+            stopLoss = Math.max(currentPrice - (atr * 2), recentLow);
+            takeProfit = currentPrice + (atr * 4);
         } else if (side === 'SELL') {
-            stopLoss = currentPrice * 1.05; // 5% stop loss
-            takeProfit = currentPrice * 0.85; // 15% take profit
+            stopLoss = Math.min(currentPrice + (atr * 2), recentHigh);
+            takeProfit = currentPrice - (atr * 4);
         }
         
-        const shouldTrade = side !== null && confidence >= 0.2; // Reduced from 0.3 to 0.2
+        const riskRewardRatio = side ? 2.0 : 0;
         
         return {
-            shouldTrade: shouldTrade,
+            shouldTrade: side !== null && confidence >= 0.4,
             side: side,
-            reason: reasons.join(', ') || 'Simplified analysis',
-            confidence: confidence,
+            reason: reasons.slice(0, 2).join(', ') || 'Limited data analysis',
+            confidence: Math.min(confidence, 0.7), // Cap confidence for simplified
             stopLoss: stopLoss,
             takeProfit: takeProfit,
-            riskRewardRatio: 3.0, // 3:1 risk/reward ratio
-            signalsUsed: {momentum: 1.0},
-            nnConfidence: 0,
-            trendStrength: Math.abs(priceChange),
-            volatilityRatio: 0.02
+            riskRewardRatio: riskRewardRatio,
+            scores: { buy: buyScore, sell: sellScore }
         };
     }
 
@@ -1590,15 +1711,15 @@ class TradingBot {
                 continue;
             }
             
-            this.debugLog(`[RELOAD] Fetching 1440 candles for ${pair} (${krakenPair})...`, 'info');
+            this.debugLog(`[RELOAD] Fetching 2880 candles for ${pair} (${krakenPair})...`, 'info');
             try {
-                const ohlc = await window.app.krakenAPI.getOHLCData(krakenPair, 1, null, 1); // 1-minute candles, 1 day
-                if (ohlc && ohlc.length >= 1440) {
-                    this.chartData[pair] = ohlc.slice(-1440); // keep last 1440 candles
+                const ohlc = await window.app.krakenAPI.getOHLCData(krakenPair, 1, null, 2); // 1-minute candles, 2 days
+                if (ohlc && ohlc.length >= 2880) {
+                    this.chartData[pair] = ohlc.slice(-2880); // keep last 2880 candles
                     this.debugLog(`[RELOAD] ✅ ${pair} candles loaded: ${this.chartData[pair].length}`);
                 } else if (ohlc && ohlc.length >= 100) {
                     this.chartData[pair] = ohlc.slice(-100); // fallback to 100 if not enough data
-                    this.debugLog(`[RELOAD] ⚠️ ${pair} limited data: ${this.chartData[pair].length} candles (wanted 1440)`, 'warning');
+                    this.debugLog(`[RELOAD] ⚠️ ${pair} limited data: ${this.chartData[pair].length} candles (wanted 2880)`, 'warning');
                 } else {
                     this.debugLog(`[RELOAD] ⚠️ ${pair} insufficient data: ${ohlc?.length || 0} candles`, 'warning');
                 }
@@ -1630,12 +1751,20 @@ class TradingBot {
 
     async initNeuralNet() {
         if (typeof tf === 'undefined') return;
-        // 7 input features, 1 output (buy/sell/hold)
+        // 13 input features for advanced analysis, 3 outputs (buy/sell/hold)
         this.nnModel = tf.sequential();
-        this.nnModel.add(tf.layers.dense({inputShape: [7], units: 16, activation: 'relu'}));
+        this.nnModel.add(tf.layers.dense({inputShape: [13], units: 32, activation: 'relu'}));
+        this.nnModel.add(tf.layers.dropout({rate: 0.2}));
+        this.nnModel.add(tf.layers.dense({units: 16, activation: 'relu'}));
+        this.nnModel.add(tf.layers.dropout({rate: 0.1}));
         this.nnModel.add(tf.layers.dense({units: 8, activation: 'relu'}));
         this.nnModel.add(tf.layers.dense({units: 3, activation: 'softmax'}));
-        this.nnModel.compile({optimizer: 'adam', loss: 'categoricalCrossentropy'});
+        this.nnModel.compile({
+            optimizer: tf.train.adam(0.001),
+            loss: 'categoricalCrossentropy',
+            metrics: ['accuracy']
+        });
+        this.debugLog('Neural network initialized with advanced architecture', 'success');
     }
 
     // Extract features for neural net: [price/sma50, rsi, macd, macdSignal, volumeRatio, adx, price/majorSupport]
@@ -1739,6 +1868,1123 @@ class TradingBot {
         const scaled = min + (max - min) * Math.min(Math.max(aiConfidence, 0), 1);
         this.debugLog(`[AI] Dynamic investment for ${pair}: £${scaled.toFixed(2)} (confidence: ${aiConfidence})`, 'info');
         return scaled;
+    }
+
+    /**
+     * Calculate advanced technical indicators for swing trading
+     */
+    calculateAdvancedIndicators(chartData) {
+        const prices = chartData.map(d => d.close);
+        const highs = chartData.map(d => d.high);
+        const lows = chartData.map(d => d.low);
+        const volumes = chartData.map(d => d.volume || 1000);
+        
+        // Basic indicators from original method
+        const basicIndicators = this.calculateSwingIndicators(chartData);
+        
+        // EMA Ribbon (8, 13, 21, 55)
+        const ema8 = this.calculateEMA(prices, 8);
+        const ema13 = this.calculateEMA(prices, 13);
+        const ema21 = this.calculateEMA(prices, 21);
+        const ema55 = this.calculateEMA(prices, 55);
+        const ema200 = this.calculateEMA(prices, 200);
+        
+        // Bollinger Bands (20, 2)
+        const bb = this.calculateBollingerBands(prices, 20, 2);
+        
+        // Stochastic RSI
+        const stochRSI = this.calculateStochasticRSI(prices, 14, 14, 3, 3);
+        
+        // VWAP (Volume Weighted Average Price)
+        const vwap = this.calculateVWAP(chartData);
+        
+        // Ichimoku Cloud
+        const ichimoku = this.calculateIchimokuCloud(highs, lows, prices);
+        
+        // Williams %R
+        const williamsR = this.calculateWilliamsR(highs, lows, prices, 14);
+        
+        // OBV (On Balance Volume)
+        const obv = this.calculateOBV(prices, volumes);
+        
+        // Fibonacci Levels
+        const fibLevels = this.calculateFibonacciLevels(chartData);
+        
+        // Support/Resistance Clusters
+        const srClusters = this.findSupportResistanceClusters(chartData);
+        
+        // Momentum indicators
+        const momentum = this.calculateMomentum(prices, 14);
+        const roc = this.calculateROC(prices, 14);
+        
+        return {
+            ...basicIndicators,
+            ema8, ema13, ema21, ema55, ema200,
+            bollingerUpper: bb.upper,
+            bollingerMiddle: bb.middle,
+            bollingerLower: bb.lower,
+            bollingerWidth: bb.width,
+            stochRSI: stochRSI,
+            vwap: vwap,
+            ichimoku: ichimoku,
+            williamsR: williamsR,
+            obv: obv,
+            fibLevels: fibLevels,
+            supportClusters: srClusters.support,
+            resistanceClusters: srClusters.resistance,
+            momentum: momentum,
+            roc: roc,
+            atr: this.calculateATR(chartData, 14),
+            currentPrice: prices[prices.length - 1]
+        };
+    }
+
+    /**
+     * Calculate Bollinger Bands
+     */
+    calculateBollingerBands(prices, period = 20, stdDev = 2) {
+        if (prices.length < period) {
+            return { upper: 0, middle: 0, lower: 0, width: 0 };
+        }
+        
+        const slice = prices.slice(-period);
+        const sma = slice.reduce((a, b) => a + b, 0) / period;
+        
+        const variance = slice.reduce((sum, price) => {
+            return sum + Math.pow(price - sma, 2);
+        }, 0) / period;
+        
+        const std = Math.sqrt(variance);
+        
+        return {
+            upper: sma + (std * stdDev),
+            middle: sma,
+            lower: sma - (std * stdDev),
+            width: (std * stdDev * 2) / sma
+        };
+    }
+
+    /**
+     * Calculate Stochastic RSI
+     */
+    calculateStochasticRSI(prices, rsiPeriod = 14, stochPeriod = 14, kPeriod = 3, dPeriod = 3) {
+        if (prices.length < rsiPeriod + stochPeriod) {
+            return { k: 50, d: 50 };
+        }
+        
+        // Calculate RSI values
+        const rsiValues = [];
+        for (let i = rsiPeriod; i < prices.length; i++) {
+            const slice = prices.slice(i - rsiPeriod, i);
+            rsiValues.push(this.calculateRSI(slice, rsiPeriod));
+        }
+        
+        if (rsiValues.length < stochPeriod) {
+            return { k: 50, d: 50 };
+        }
+        
+        // Calculate Stochastic of RSI
+        const recentRSI = rsiValues.slice(-stochPeriod);
+        const currentRSI = rsiValues[rsiValues.length - 1];
+        const lowestRSI = Math.min(...recentRSI);
+        const highestRSI = Math.max(...recentRSI);
+        
+        const k = highestRSI !== lowestRSI ? 
+            ((currentRSI - lowestRSI) / (highestRSI - lowestRSI)) * 100 : 50;
+        
+        return { k: k, d: k }; // Simplified - would need to track K values for D
+    }
+
+    /**
+     * Calculate VWAP
+     */
+    calculateVWAP(chartData) {
+        if (chartData.length === 0) return 0;
+        
+        let cumulativeTPV = 0; // Total Price * Volume
+        let cumulativeVolume = 0;
+        
+        const todayStart = new Date();
+        todayStart.setUTCHours(0, 0, 0, 0);
+        const todayStartTime = todayStart.getTime() / 1000;
+        
+        for (const candle of chartData) {
+            if (candle.time >= todayStartTime) {
+                const typicalPrice = (candle.high + candle.low + candle.close) / 3;
+                const volume = candle.volume || 1;
+                cumulativeTPV += typicalPrice * volume;
+                cumulativeVolume += volume;
+            }
+        }
+        
+        return cumulativeVolume > 0 ? cumulativeTPV / cumulativeVolume : chartData[chartData.length - 1].close;
+    }
+
+    /**
+     * Calculate Ichimoku Cloud
+     */
+    calculateIchimokuCloud(highs, lows, prices) {
+        const tenkan = this.calculateDonchian(highs, lows, 9);
+        const kijun = this.calculateDonchian(highs, lows, 26);
+        const senkouA = (tenkan + kijun) / 2;
+        const senkouB = this.calculateDonchian(highs, lows, 52);
+        const chikou = prices[prices.length - 26] || prices[prices.length - 1];
+        
+        return {
+            tenkan: tenkan,
+            kijun: kijun,
+            senkouA: senkouA,
+            senkouB: senkouB,
+            chikou: chikou,
+            cloudTop: Math.max(senkouA, senkouB),
+            cloudBottom: Math.min(senkouA, senkouB)
+        };
+    }
+
+    /**
+     * Calculate Donchian Channel (for Ichimoku)
+     */
+    calculateDonchian(highs, lows, period) {
+        if (highs.length < period) return (highs[highs.length - 1] + lows[lows.length - 1]) / 2;
+        
+        const recentHighs = highs.slice(-period);
+        const recentLows = lows.slice(-period);
+        
+        return (Math.max(...recentHighs) + Math.min(...recentLows)) / 2;
+    }
+
+    /**
+     * Calculate Williams %R
+     */
+    calculateWilliamsR(highs, lows, prices, period = 14) {
+        if (prices.length < period) return -50;
+        
+        const recentHighs = highs.slice(-period);
+        const recentLows = lows.slice(-period);
+        const currentPrice = prices[prices.length - 1];
+        
+        const highest = Math.max(...recentHighs);
+        const lowest = Math.min(...recentLows);
+        
+        if (highest === lowest) return -50;
+        
+        return -100 * ((highest - currentPrice) / (highest - lowest));
+    }
+
+    /**
+     * Calculate OBV (On Balance Volume)
+     */
+    calculateOBV(prices, volumes) {
+        if (prices.length < 2) return 0;
+        
+        let obv = 0;
+        for (let i = 1; i < prices.length; i++) {
+            if (prices[i] > prices[i - 1]) {
+                obv += volumes[i];
+            } else if (prices[i] < prices[i - 1]) {
+                obv -= volumes[i];
+            }
+        }
+        
+        return obv;
+    }
+
+    /**
+     * Calculate Fibonacci Levels
+     */
+    calculateFibonacciLevels(chartData) {
+        if (chartData.length < 50) return {};
+        
+        const recent = chartData.slice(-100);
+        const highs = recent.map(d => d.high);
+        const lows = recent.map(d => d.low);
+        
+        const swingHigh = Math.max(...highs);
+        const swingLow = Math.min(...lows);
+        const diff = swingHigh - swingLow;
+        
+        return {
+            high: swingHigh,
+            low: swingLow,
+            fib236: swingLow + (diff * 0.236),
+            fib382: swingLow + (diff * 0.382),
+            fib50: swingLow + (diff * 0.5),
+            fib618: swingLow + (diff * 0.618),
+            fib786: swingLow + (diff * 0.786)
+        };
+    }
+
+    /**
+     * Find Support/Resistance Clusters
+     */
+    findSupportResistanceClusters(chartData) {
+        if (chartData.length < 50) return { support: [], resistance: [] };
+        
+        const pricePoints = [];
+        
+        // Collect significant price points
+        for (let i = 10; i < chartData.length - 10; i++) {
+            const isLocalHigh = this.isLocalExtreme(chartData, i, 10, true);
+            const isLocalLow = this.isLocalExtreme(chartData, i, 10, false);
+            
+            if (isLocalHigh) {
+                pricePoints.push({ price: chartData[i].high, type: 'resistance' });
+            }
+            if (isLocalLow) {
+                pricePoints.push({ price: chartData[i].low, type: 'support' });
+            }
+        }
+        
+        // Cluster nearby levels
+        const clusters = this.clusterPriceLevels(pricePoints, 0.01); // 1% threshold
+        
+        return {
+            support: clusters.filter(c => c.type === 'support').map(c => c.price),
+            resistance: clusters.filter(c => c.type === 'resistance').map(c => c.price)
+        };
+    }
+
+    /**
+     * Check if a point is a local extreme
+     */
+    isLocalExtreme(data, index, lookback, isHigh) {
+        if (index < lookback || index >= data.length - lookback) return false;
+        
+        const point = isHigh ? data[index].high : data[index].low;
+        
+        for (let i = index - lookback; i <= index + lookback; i++) {
+            if (i === index) continue;
+            const compare = isHigh ? data[i].high : data[i].low;
+            if (isHigh && compare > point) return false;
+            if (!isHigh && compare < point) return false;
+        }
+        
+        return true;
+    }
+
+    /**
+     * Cluster price levels
+     */
+    clusterPriceLevels(pricePoints, threshold) {
+        const clusters = [];
+        const used = new Set();
+        
+        for (let i = 0; i < pricePoints.length; i++) {
+            if (used.has(i)) continue;
+            
+            const cluster = [pricePoints[i]];
+            used.add(i);
+            
+            for (let j = i + 1; j < pricePoints.length; j++) {
+                if (used.has(j)) continue;
+                
+                const priceDiff = Math.abs(pricePoints[i].price - pricePoints[j].price) / pricePoints[i].price;
+                if (priceDiff <= threshold) {
+                    cluster.push(pricePoints[j]);
+                    used.add(j);
+                }
+            }
+            
+            if (cluster.length >= 2) {
+                const avgPrice = cluster.reduce((sum, p) => sum + p.price, 0) / cluster.length;
+                const types = cluster.map(p => p.type);
+                const dominantType = types.filter(t => t === 'support').length > types.length / 2 ? 'support' : 'resistance';
+                
+                clusters.push({
+                    price: avgPrice,
+                    strength: cluster.length,
+                    type: dominantType
+                });
+            }
+        }
+        
+        return clusters.sort((a, b) => b.strength - a.strength);
+    }
+
+    /**
+     * Calculate Momentum
+     */
+    calculateMomentum(prices, period = 14) {
+        if (prices.length < period + 1) return 0;
+        
+        const currentPrice = prices[prices.length - 1];
+        const pastPrice = prices[prices.length - 1 - period];
+        
+        return ((currentPrice - pastPrice) / pastPrice) * 100;
+    }
+
+    /**
+     * Calculate Rate of Change (ROC)
+     */
+    calculateROC(prices, period = 14) {
+        return this.calculateMomentum(prices, period); // Same calculation
+    }
+
+    /**
+     * Detect market regime (trending, ranging, volatile)
+     */
+    detectMarketRegime(chartData, indicators) {
+        const prices = chartData.map(d => d.close);
+        const atr = indicators.atr;
+        const adx = indicators.adx;
+        const currentPrice = prices[prices.length - 1];
+        
+        // Calculate trend strength using multiple EMAs
+        const emaOrder = indicators.ema8 > indicators.ema13 && 
+                        indicators.ema13 > indicators.ema21 && 
+                        indicators.ema21 > indicators.ema55;
+        const emaOrderBear = indicators.ema8 < indicators.ema13 && 
+                           indicators.ema13 < indicators.ema21 && 
+                           indicators.ema21 < indicators.ema55;
+        
+        // Calculate volatility
+        const volatilityRatio = atr / currentPrice;
+        const bbWidth = indicators.bollingerWidth;
+        
+        // Price position relative to key levels
+        const aboveCloud = currentPrice > indicators.ichimoku.cloudTop;
+        const belowCloud = currentPrice < indicators.ichimoku.cloudBottom;
+        const inCloud = !aboveCloud && !belowCloud;
+        
+        // Determine regime
+        let type = 'ranging';
+        let strength = 0;
+        let volatility = volatilityRatio;
+        
+        if (adx > 40 && emaOrder && aboveCloud) {
+            type = 'strong_uptrend';
+            strength = 0.9;
+        } else if (adx > 40 && emaOrderBear && belowCloud) {
+            type = 'strong_downtrend';
+            strength = 0.9;
+        } else if (adx > 25 && emaOrder) {
+            type = 'uptrend';
+            strength = 0.7;
+        } else if (adx > 25 && emaOrderBear) {
+            type = 'downtrend';
+            strength = 0.7;
+        } else if (adx < 20 && bbWidth < 0.1) {
+            type = 'tight_range';
+            strength = 0.5;
+        } else if (volatilityRatio > 0.05) {
+            type = 'volatile';
+            strength = 0.6;
+        }
+        
+        return {
+            type: type,
+            strength: strength,
+            volatility: volatility,
+            adx: adx,
+            trending: adx > 25,
+            emaAlignment: emaOrder ? 'bullish' : emaOrderBear ? 'bearish' : 'neutral'
+        };
+    }
+
+    /**
+     * Detect chart patterns
+     */
+    detectPatterns(chartData) {
+        const patterns = {
+            bullish: [],
+            bearish: [],
+            neutral: []
+        };
+        
+        if (chartData.length < 50) return patterns;
+        
+        // Detect various patterns
+        const candlePatterns = this.detectCandlestickPatterns(chartData);
+        const chartPatterns = this.detectChartPatterns(chartData);
+        
+        // Combine all patterns
+        patterns.bullish = [...candlePatterns.bullish, ...chartPatterns.bullish]
+            .sort((a, b) => b.strength - a.strength);
+        patterns.bearish = [...candlePatterns.bearish, ...chartPatterns.bearish]
+            .sort((a, b) => b.strength - a.strength);
+        
+        return patterns;
+    }
+
+    /**
+     * Detect candlestick patterns
+     */
+    detectCandlestickPatterns(chartData) {
+        const patterns = { bullish: [], bearish: [] };
+        
+        if (chartData.length < 3) return patterns;
+        
+        const last = chartData[chartData.length - 1];
+        const prev = chartData[chartData.length - 2];
+        const prev2 = chartData[chartData.length - 3];
+        
+        // Bullish patterns
+        if (this.isHammer(last) && prev.close < prev.open) {
+            patterns.bullish.push({ name: 'Hammer', strength: 0.7 });
+        }
+        
+        if (this.isBullishEngulfing(prev, last)) {
+            patterns.bullish.push({ name: 'Bullish Engulfing', strength: 0.8 });
+        }
+        
+        if (this.isMorningStar(prev2, prev, last)) {
+            patterns.bullish.push({ name: 'Morning Star', strength: 0.9 });
+        }
+        
+        // Bearish patterns
+        if (this.isShootingStar(last) && prev.close > prev.open) {
+            patterns.bearish.push({ name: 'Shooting Star', strength: 0.7 });
+        }
+        
+        if (this.isBearishEngulfing(prev, last)) {
+            patterns.bearish.push({ name: 'Bearish Engulfing', strength: 0.8 });
+        }
+        
+        if (this.isEveningStar(prev2, prev, last)) {
+            patterns.bearish.push({ name: 'Evening Star', strength: 0.9 });
+        }
+        
+        return patterns;
+    }
+
+    /**
+     * Detect chart patterns (triangles, flags, etc.)
+     */
+    detectChartPatterns(chartData) {
+        const patterns = { bullish: [], bearish: [] };
+        
+        // Detect triangle patterns
+        const triangle = this.detectTriangle(chartData);
+        if (triangle) {
+            if (triangle.type === 'ascending') {
+                patterns.bullish.push({ name: 'Ascending Triangle', strength: 0.75 });
+            } else if (triangle.type === 'descending') {
+                patterns.bearish.push({ name: 'Descending Triangle', strength: 0.75 });
+            }
+        }
+        
+        // Detect flag patterns
+        const flag = this.detectFlag(chartData);
+        if (flag) {
+            if (flag.type === 'bull') {
+                patterns.bullish.push({ name: 'Bull Flag', strength: 0.8 });
+            } else if (flag.type === 'bear') {
+                patterns.bearish.push({ name: 'Bear Flag', strength: 0.8 });
+            }
+        }
+        
+        // Detect double top/bottom
+        const doublePattern = this.detectDoubleTopBottom(chartData);
+        if (doublePattern) {
+            if (doublePattern.type === 'bottom') {
+                patterns.bullish.push({ name: 'Double Bottom', strength: 0.85 });
+            } else if (doublePattern.type === 'top') {
+                patterns.bearish.push({ name: 'Double Top', strength: 0.85 });
+            }
+        }
+        
+        return patterns;
+    }
+
+    // Candlestick pattern helpers
+    isHammer(candle) {
+        const body = Math.abs(candle.close - candle.open);
+        const lowerWick = Math.min(candle.open, candle.close) - candle.low;
+        const upperWick = candle.high - Math.max(candle.open, candle.close);
+        
+        return lowerWick > body * 2 && upperWick < body * 0.5;
+    }
+
+    isShootingStar(candle) {
+        const body = Math.abs(candle.close - candle.open);
+        const upperWick = candle.high - Math.max(candle.open, candle.close);
+        const lowerWick = Math.min(candle.open, candle.close) - candle.low;
+        
+        return upperWick > body * 2 && lowerWick < body * 0.5;
+    }
+
+    isBullishEngulfing(prev, current) {
+        return prev.close < prev.open && // Previous bearish
+               current.close > current.open && // Current bullish
+               current.open < prev.close && // Opens below previous close
+               current.close > prev.open; // Closes above previous open
+    }
+
+    isBearishEngulfing(prev, current) {
+        return prev.close > prev.open && // Previous bullish
+               current.close < current.open && // Current bearish
+               current.open > prev.close && // Opens above previous close
+               current.close < prev.open; // Closes below previous open
+    }
+
+    isMorningStar(first, second, third) {
+        const firstBearish = first.close < first.open;
+        const secondSmall = Math.abs(second.close - second.open) < Math.abs(first.close - first.open) * 0.3;
+        const thirdBullish = third.close > third.open;
+        const gapDown = second.high < first.low;
+        const gapUp = third.low > second.high;
+        
+        return firstBearish && secondSmall && thirdBullish && (gapDown || gapUp);
+    }
+
+    isEveningStar(first, second, third) {
+        const firstBullish = first.close > first.open;
+        const secondSmall = Math.abs(second.close - second.open) < Math.abs(first.close - first.open) * 0.3;
+        const thirdBearish = third.close < third.open;
+        const gapUp = second.low > first.high;
+        const gapDown = third.high < second.low;
+        
+        return firstBullish && secondSmall && thirdBearish && (gapUp || gapDown);
+    }
+
+    // Chart pattern helpers
+    detectTriangle(chartData) {
+        if (chartData.length < 50) return null;
+        
+        const highs = chartData.slice(-50).map(d => d.high);
+        const lows = chartData.slice(-50).map(d => d.low);
+        
+        // Find trend lines
+        const upperTrend = this.calculateTrendLine(highs, true);
+        const lowerTrend = this.calculateTrendLine(lows, false);
+        
+        if (!upperTrend || !lowerTrend) return null;
+        
+        // Determine triangle type
+        if (upperTrend.slope < -0.001 && Math.abs(lowerTrend.slope) < 0.001) {
+            return { type: 'descending', strength: 0.75 };
+        } else if (lowerTrend.slope > 0.001 && Math.abs(upperTrend.slope) < 0.001) {
+            return { type: 'ascending', strength: 0.75 };
+        } else if (upperTrend.slope < -0.001 && lowerTrend.slope > 0.001) {
+            return { type: 'symmetrical', strength: 0.7 };
+        }
+        
+        return null;
+    }
+
+    detectFlag(chartData) {
+        if (chartData.length < 30) return null;
+        
+        // Look for strong move followed by consolidation
+        const recentMove = chartData.slice(-30, -10);
+        const consolidation = chartData.slice(-10);
+        
+        const moveRange = Math.max(...recentMove.map(d => d.high)) - Math.min(...recentMove.map(d => d.low));
+        const moveDirection = recentMove[recentMove.length - 1].close - recentMove[0].close;
+        
+        const consRange = Math.max(...consolidation.map(d => d.high)) - Math.min(...consolidation.map(d => d.low));
+        
+        if (consRange < moveRange * 0.3) {
+            if (moveDirection > 0) {
+                return { type: 'bull', strength: 0.8 };
+            } else {
+                return { type: 'bear', strength: 0.8 };
+            }
+        }
+        
+        return null;
+    }
+
+    detectDoubleTopBottom(chartData) {
+        if (chartData.length < 100) return null;
+        
+        const prices = chartData.map(d => d.close);
+        const peaks = [];
+        const troughs = [];
+        
+        // Find peaks and troughs
+        for (let i = 10; i < prices.length - 10; i++) {
+            if (this.isLocalExtreme(chartData, i, 10, true)) {
+                peaks.push({ index: i, price: chartData[i].high });
+            }
+            if (this.isLocalExtreme(chartData, i, 10, false)) {
+                troughs.push({ index: i, price: chartData[i].low });
+            }
+        }
+        
+        // Check for double patterns
+        if (peaks.length >= 2) {
+            const lastTwo = peaks.slice(-2);
+            const priceDiff = Math.abs(lastTwo[0].price - lastTwo[1].price) / lastTwo[0].price;
+            if (priceDiff < 0.02) { // Within 2%
+                return { type: 'top', strength: 0.85 };
+            }
+        }
+        
+        if (troughs.length >= 2) {
+            const lastTwo = troughs.slice(-2);
+            const priceDiff = Math.abs(lastTwo[0].price - lastTwo[1].price) / lastTwo[0].price;
+            if (priceDiff < 0.02) { // Within 2%
+                return { type: 'bottom', strength: 0.85 };
+            }
+        }
+        
+        return null;
+    }
+
+    calculateTrendLine(data, isUpper) {
+        // Simple linear regression for trend line
+        const n = data.length;
+        let sumX = 0, sumY = 0, sumXY = 0, sumX2 = 0;
+        
+        for (let i = 0; i < n; i++) {
+            sumX += i;
+            sumY += data[i];
+            sumXY += i * data[i];
+            sumX2 += i * i;
+        }
+        
+        const slope = (n * sumXY - sumX * sumY) / (n * sumX2 - sumX * sumX);
+        const intercept = (sumY - slope * sumX) / n;
+        
+        return { slope, intercept };
+    }
+
+    /**
+     * Multi-timeframe analysis
+     */
+    async multiTimeframeAnalysis(pair, data) {
+        // For swing trading, we'll simulate different timeframes from 1-minute data
+        const chartData = this.getChartData(pair, 'candlestick');
+        
+        if (!chartData || chartData.length < 240) { // Need at least 4 hours of data
+            return { signal: 'NEUTRAL', strength: 0, confidence: 0 };
+        }
+        
+        // Aggregate candles for different timeframes
+        const tf5m = this.aggregateCandles(chartData, 5);
+        const tf15m = this.aggregateCandles(chartData, 15);
+        const tf1h = this.aggregateCandles(chartData, 60);
+        
+        // Calculate indicators for each timeframe
+        const indicators5m = this.calculateSwingIndicators(tf5m.slice(-100));
+        const indicators15m = this.calculateSwingIndicators(tf15m.slice(-100));
+        const indicators1h = this.calculateSwingIndicators(tf1h.slice(-50));
+        
+        // Analyze trend alignment across timeframes
+        let bullishCount = 0;
+        let bearishCount = 0;
+        
+        // 5-minute timeframe
+        if (indicators5m.rsi > 50 && indicators5m.macd > indicators5m.macdSignal) {
+            bullishCount++;
+        } else if (indicators5m.rsi < 50 && indicators5m.macd < indicators5m.macdSignal) {
+            bearishCount++;
+        }
+        
+        // 15-minute timeframe
+        if (indicators15m.rsi > 50 && indicators15m.macd > indicators15m.macdSignal) {
+            bullishCount++;
+        } else if (indicators15m.rsi < 50 && indicators15m.macd < indicators15m.macdSignal) {
+            bearishCount++;
+        }
+        
+        // 1-hour timeframe
+        if (indicators1h.rsi > 50 && indicators1h.macd > indicators1h.macdSignal) {
+            bullishCount += 2; // Higher weight for longer timeframe
+        } else if (indicators1h.rsi < 50 && indicators1h.macd < indicators1h.macdSignal) {
+            bearishCount += 2;
+        }
+        
+        // Determine signal
+        let signal = 'NEUTRAL';
+        let strength = 0;
+        let confidence = 0;
+        
+        if (bullishCount >= 3) {
+            signal = 'BUY';
+            strength = bullishCount / 4;
+            confidence = strength * 0.8;
+        } else if (bearishCount >= 3) {
+            signal = 'SELL';
+            strength = bearishCount / 4;
+            confidence = strength * 0.8;
+        }
+        
+        return { signal, strength, confidence };
+    }
+
+    /**
+     * Aggregate candles for different timeframes
+     */
+    aggregateCandles(candles, periodMinutes) {
+        const aggregated = [];
+        
+        for (let i = 0; i < candles.length; i += periodMinutes) {
+            const slice = candles.slice(i, i + periodMinutes);
+            if (slice.length === 0) continue;
+            
+            aggregated.push({
+                time: slice[0].time,
+                open: slice[0].open,
+                high: Math.max(...slice.map(c => c.high)),
+                low: Math.min(...slice.map(c => c.low)),
+                close: slice[slice.length - 1].close,
+                volume: slice.reduce((sum, c) => sum + (c.volume || 0), 0)
+            });
+        }
+        
+        return aggregated;
+    }
+
+    /**
+     * Calculate technical score based on multiple indicators
+     */
+    calculateTechnicalScore(indicators, currentPrice) {
+        let buyPoints = 0;
+        let sellPoints = 0;
+        let totalPoints = 0;
+        let reasons = [];
+        
+        // RSI Analysis (weight: 15%)
+        if (indicators.rsi < 30) {
+            buyPoints += 15;
+            reasons.push('RSI oversold');
+        } else if (indicators.rsi > 70) {
+            sellPoints += 15;
+            reasons.push('RSI overbought');
+        } else if (indicators.rsi > 50 && indicators.rsi < 70) {
+            buyPoints += 7;
+        } else if (indicators.rsi < 50 && indicators.rsi > 30) {
+            sellPoints += 7;
+        }
+        totalPoints += 15;
+        
+        // Stochastic RSI (weight: 10%)
+        if (indicators.stochRSI.k < 20) {
+            buyPoints += 10;
+            reasons.push('StochRSI oversold');
+        } else if (indicators.stochRSI.k > 80) {
+            sellPoints += 10;
+            reasons.push('StochRSI overbought');
+        }
+        totalPoints += 10;
+        
+        // MACD (weight: 15%)
+        if (indicators.macd > indicators.macdSignal && indicators.macd > 0) {
+            buyPoints += 15;
+            reasons.push('MACD bullish');
+        } else if (indicators.macd < indicators.macdSignal && indicators.macd < 0) {
+            sellPoints += 15;
+            reasons.push('MACD bearish');
+        } else if (indicators.macd > indicators.macdSignal) {
+            buyPoints += 7;
+        } else {
+            sellPoints += 7;
+        }
+        totalPoints += 15;
+        
+        // Bollinger Bands (weight: 10%)
+        if (currentPrice < indicators.bollingerLower) {
+            buyPoints += 10;
+            reasons.push('Below BB lower');
+        } else if (currentPrice > indicators.bollingerUpper) {
+            sellPoints += 10;
+            reasons.push('Above BB upper');
+        }
+        totalPoints += 10;
+        
+        // Moving Average Alignment (weight: 20%)
+        if (indicators.ema8 > indicators.ema21 && indicators.ema21 > indicators.ema55) {
+            buyPoints += 20;
+            reasons.push('Bullish EMA alignment');
+        } else if (indicators.ema8 < indicators.ema21 && indicators.ema21 < indicators.ema55) {
+            sellPoints += 20;
+            reasons.push('Bearish EMA alignment');
+        } else {
+            totalPoints += 10; // Reduce weight if not aligned
+        }
+        totalPoints += 20;
+        
+        // Ichimoku Cloud (weight: 15%)
+        if (currentPrice > indicators.ichimoku.cloudTop) {
+            buyPoints += 15;
+            reasons.push('Above Ichimoku cloud');
+        } else if (currentPrice < indicators.ichimoku.cloudBottom) {
+            sellPoints += 15;
+            reasons.push('Below Ichimoku cloud');
+        }
+        totalPoints += 15;
+        
+        // Williams %R (weight: 5%)
+        if (indicators.williamsR < -80) {
+            buyPoints += 5;
+        } else if (indicators.williamsR > -20) {
+            sellPoints += 5;
+        }
+        totalPoints += 5;
+        
+        // VWAP (weight: 10%)
+        if (currentPrice > indicators.vwap) {
+            buyPoints += 5;
+        } else if (currentPrice < indicators.vwap) {
+            sellPoints += 5;
+        }
+        totalPoints += 10;
+        
+        // Calculate final score
+        const buyScore = buyPoints / totalPoints;
+        const sellScore = sellPoints / totalPoints;
+        
+        let signal = 'NEUTRAL';
+        let strength = 0;
+        let confidence = 0;
+        
+        if (buyScore > sellScore && buyScore > 0.4) {
+            signal = 'BUY';
+            strength = buyScore;
+            confidence = buyScore;
+            reasons = reasons.filter(r => r.includes('bullish') || r.includes('oversold') || r.includes('Below') || r.includes('Above Ichimoku'));
+        } else if (sellScore > buyScore && sellScore > 0.4) {
+            signal = 'SELL';
+            strength = sellScore;
+            confidence = sellScore;
+            reasons = reasons.filter(r => r.includes('bearish') || r.includes('overbought') || r.includes('Above') || r.includes('Below Ichimoku'));
+        }
+        
+        return {
+            signal: signal,
+            strength: strength,
+            confidence: confidence,
+            reason: reasons.slice(0, 2).join(', '),
+            buyScore: buyScore,
+            sellScore: sellScore
+        };
+    }
+
+    /**
+     * Analyze volume patterns
+     */
+    analyzeVolume(chartData, indicators) {
+        if (chartData.length < 50) {
+            return { signal: 'NEUTRAL', strength: 0, confidence: 0, reason: 'Insufficient data' };
+        }
+        
+        const volumes = chartData.map(d => d.volume || 0);
+        const prices = chartData.map(d => d.close);
+        
+        // Calculate volume metrics
+        const currentVolume = volumes[volumes.length - 1];
+        const avgVolume20 = volumes.slice(-20).reduce((a, b) => a + b, 0) / 20;
+        const avgVolume50 = volumes.slice(-50).reduce((a, b) => a + b, 0) / 50;
+        const volumeRatio = currentVolume / avgVolume20;
+        
+        // OBV trend
+        const obvTrend = this.calculateTrendLine(volumes.slice(-20).map((_, i) => indicators.obv), false);
+        
+        // Price-volume correlation
+        const priceChange = (prices[prices.length - 1] - prices[prices.length - 2]) / prices[prices.length - 2];
+        const volumeChange = (currentVolume - volumes[volumes.length - 2]) / volumes[volumes.length - 2];
+        
+        let signal = 'NEUTRAL';
+        let strength = 0;
+        let confidence = 0;
+        let reason = '';
+        
+        // High volume breakout
+        if (volumeRatio > 2.0 && priceChange > 0.01) {
+            signal = 'BUY';
+            strength = Math.min(volumeRatio / 3, 1);
+            confidence = strength * 0.8;
+            reason = 'High volume breakout';
+        } else if (volumeRatio > 2.0 && priceChange < -0.01) {
+            signal = 'SELL';
+            strength = Math.min(volumeRatio / 3, 1);
+            confidence = strength * 0.8;
+            reason = 'High volume breakdown';
+        }
+        // OBV divergence
+        else if (obvTrend.slope > 0 && priceChange < 0) {
+            signal = 'BUY';
+            strength = 0.6;
+            confidence = 0.5;
+            reason = 'Bullish OBV divergence';
+        } else if (obvTrend.slope < 0 && priceChange > 0) {
+            signal = 'SELL';
+            strength = 0.6;
+            confidence = 0.5;
+            reason = 'Bearish OBV divergence';
+        }
+        // Volume confirmation
+        else if (volumeRatio > 1.5 && priceChange > 0) {
+            signal = 'BUY';
+            strength = 0.5;
+            confidence = 0.4;
+            reason = 'Volume confirms uptrend';
+        } else if (volumeRatio > 1.5 && priceChange < 0) {
+            signal = 'SELL';
+            strength = 0.5;
+            confidence = 0.4;
+            reason = 'Volume confirms downtrend';
+        }
+        
+        return { signal, strength, confidence, reason };
+    }
+
+    /**
+     * Extract advanced features for neural network
+     */
+    extractAdvancedFeatures(indicators, data, marketRegime, patterns) {
+        // Normalize all features to 0-1 range
+        const features = [
+            // Price relative to key levels
+            Math.min(data.price / indicators.ema200, 2) / 2,
+            Math.min(data.price / indicators.vwap, 2) / 2,
+            (data.price - indicators.bollingerLower) / (indicators.bollingerUpper - indicators.bollingerLower),
+            
+            // Technical indicators
+            indicators.rsi / 100,
+            indicators.stochRSI.k / 100,
+            (indicators.macd + 1) / 2, // Normalize MACD
+            Math.min(indicators.adx / 100, 1),
+            
+            // Market regime
+            marketRegime.type === 'strong_uptrend' ? 1 : marketRegime.type === 'uptrend' ? 0.7 : 
+            marketRegime.type === 'strong_downtrend' ? 0 : marketRegime.type === 'downtrend' ? 0.3 : 0.5,
+            
+            // Volatility
+            Math.min(marketRegime.volatility * 20, 1),
+            
+            // Pattern strength
+            patterns.bullish.length > 0 ? patterns.bullish[0].strength : 
+            patterns.bearish.length > 0 ? 1 - patterns.bearish[0].strength : 0.5,
+            
+            // Volume
+            Math.min(indicators.volumeRatio / 3, 1),
+            
+            // Momentum
+            (indicators.momentum + 50) / 100,
+            
+            // Support/Resistance distance
+            indicators.supportClusters.length > 0 ? 
+                Math.min((data.price - Math.max(...indicators.supportClusters)) / data.price, 0.1) * 10 : 0.5
+        ];
+        
+        return features;
+    }
+
+    /**
+     * Calculate dynamic risk parameters based on market conditions
+     */
+    calculateDynamicRiskParameters(pair, data, indicators, marketRegime, side) {
+        const currentPrice = data.price;
+        const atr = indicators.atr;
+        
+        // Base risk parameters
+        let stopLossDistance = atr * 2; // 2x ATR for swing trading
+        let takeProfitDistance = atr * 6; // 6x ATR for swing trading
+        
+        // Adjust based on market regime
+        if (marketRegime.type === 'volatile') {
+            stopLossDistance *= 1.5; // Wider stop in volatile markets
+            takeProfitDistance *= 1.2;
+        } else if (marketRegime.type === 'tight_range') {
+            stopLossDistance *= 0.8; // Tighter stop in ranging markets
+            takeProfitDistance *= 0.8;
+        }
+        
+        // Adjust based on support/resistance levels
+        if (side === 'BUY') {
+            // Find nearest support for stop loss
+            const nearestSupport = this.findNearestLevel(
+                currentPrice, indicators.supportClusters, false
+            );
+            if (nearestSupport && nearestSupport > currentPrice - stopLossDistance) {
+                stopLossDistance = (currentPrice - nearestSupport) * 1.1; // 10% below support
+            }
+            
+            // Find nearest resistance for take profit
+            const nearestResistance = this.findNearestLevel(
+                currentPrice, indicators.resistanceClusters, true
+            );
+            if (nearestResistance && nearestResistance < currentPrice + takeProfitDistance) {
+                takeProfitDistance = (nearestResistance - currentPrice) * 0.95; // 5% below resistance
+            }
+        } else if (side === 'SELL') {
+            // Find nearest resistance for stop loss
+            const nearestResistance = this.findNearestLevel(
+                currentPrice, indicators.resistanceClusters, true
+            );
+            if (nearestResistance && nearestResistance < currentPrice + stopLossDistance) {
+                stopLossDistance = (nearestResistance - currentPrice) * 1.1; // 10% above resistance
+            }
+            
+            // Find nearest support for take profit
+            const nearestSupport = this.findNearestLevel(
+                currentPrice, indicators.supportClusters, false
+            );
+            if (nearestSupport && nearestSupport > currentPrice - takeProfitDistance) {
+                takeProfitDistance = (currentPrice - nearestSupport) * 0.95; // 5% above support
+            }
+        }
+        
+        // Use Fibonacci levels if available
+        if (indicators.fibLevels && Object.keys(indicators.fibLevels).length > 0) {
+            if (side === 'BUY' && currentPrice < indicators.fibLevels.fib618) {
+                takeProfitDistance = Math.min(
+                    takeProfitDistance,
+                    indicators.fibLevels.fib618 - currentPrice
+                );
+            } else if (side === 'SELL' && currentPrice > indicators.fibLevels.fib382) {
+                takeProfitDistance = Math.min(
+                    takeProfitDistance,
+                    currentPrice - indicators.fibLevels.fib382
+                );
+            }
+        }
+        
+        // Calculate final levels
+        const stopLoss = side === 'BUY' ? 
+            currentPrice - stopLossDistance : 
+            currentPrice + stopLossDistance;
+            
+        const takeProfit = side === 'BUY' ? 
+            currentPrice + takeProfitDistance : 
+            currentPrice - takeProfitDistance;
+            
+        const riskRewardRatio = takeProfitDistance / stopLossDistance;
+        
+        // Ensure minimum risk/reward ratio
+        if (riskRewardRatio < 1.5) {
+            // Adjust take profit to achieve minimum ratio
+            takeProfitDistance = stopLossDistance * 1.5;
+            const newTakeProfit = side === 'BUY' ? 
+                currentPrice + takeProfitDistance : 
+                currentPrice - takeProfitDistance;
+                
+            return {
+                stopLoss: stopLoss,
+                takeProfit: newTakeProfit,
+                riskRewardRatio: 1.5,
+                stopDistance: stopLossDistance,
+                profitDistance: takeProfitDistance
+            };
+        }
+        
+        return {
+            stopLoss: stopLoss,
+            takeProfit: takeProfit,
+            riskRewardRatio: riskRewardRatio,
+            stopDistance: stopLossDistance,
+            profitDistance: takeProfitDistance
+        };
+    }
+
+    /**
+     * Find nearest support/resistance level
+     */
+    findNearestLevel(currentPrice, levels, findAbove) {
+        if (!levels || levels.length === 0) return null;
+        
+        const filtered = levels.filter(level => 
+            findAbove ? level > currentPrice : level < currentPrice
+        );
+        
+        if (filtered.length === 0) return null;
+        
+        return findAbove ? 
+            Math.min(...filtered) : 
+            Math.max(...filtered);
     }
 }
 
