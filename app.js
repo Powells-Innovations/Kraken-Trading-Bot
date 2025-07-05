@@ -807,7 +807,7 @@ class TradingApp {
         if (!pairSelector) return;
         pairSelector.innerHTML = '';
         if (this.marketType === 'crypto') {
-            const cryptoPairs = ['BTCGBP', 'XRPGBP', 'LINKGBP', 'AAVEGBP', 'FILGBP'];
+            const cryptoPairs = Object.keys(this.krakenAPI.pairNames);
             cryptoPairs.forEach((pair, index) => {
                 const button = document.createElement('button');
                 button.className = `pair-btn ${index === 0 ? 'active' : ''}`;
@@ -815,7 +815,7 @@ class TradingApp {
                 button.textContent = this.krakenAPI.pairNames[pair];
                 pairSelector.appendChild(button);
             });
-            this.selectedPair = 'BTCGBP';
+            this.selectedPair = cryptoPairs[0] || 'BTCGBP';
         } else {
             const stockTickers = ['AAPL', 'MSFT', 'GOOGL', 'AMZN', 'TSLA', 'NVDA'];
             stockTickers.forEach((ticker, index) => {
