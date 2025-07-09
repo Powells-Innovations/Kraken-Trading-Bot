@@ -17,7 +17,8 @@
 
 class KrakenAPI {
     constructor() {
-        this.baseUrl = 'http://localhost:3004/api/kraken';
+        // Use Railway URL if available, otherwise localhost
+        this.baseUrl = window.RAILWAY_CONFIG?.KRAKEN_API_BASE || 'http://localhost:3004/api/kraken';
         this.isConnected = false;
         this.lastUpdate = null;
         this.retryCount = 0;
