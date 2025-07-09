@@ -13,13 +13,16 @@ const crypto = require('crypto');
 const path = require('path');
 const fs = require('fs');
 const fetch = require('node-fetch');
+const { RAILWAY_CONFIG } = require('./railway-config');
 
 const app = express();
-const port = process.env.PORT || 8000;
+const port = RAILWAY_CONFIG.PORT;
 
 // Middleware
 app.use(cors({
-    origin: ['http://localhost:8000', 'http://127.0.0.1:8000'],
+    origin: RAILWAY_CONFIG.IS_RAILWAY ? 
+        ['https://kraken-trading-bot-production.up.railway.app', 'https://*.up.railway.app'] : 
+        ['http://localhost:8000', 'http://127.0.0.1:8000'],
     credentials: true
 }));
 app.use(express.json());
@@ -29,7 +32,9 @@ const ENCRYPTION_KEY = process.env.ENCRYPTION_KEY || 'your-secret-encryption-key
 const ALGORITHM = 'aes-256-cbc';
 
 // Database setup
-const dbPath = path.join(__dirname, 'trading_bot.db');
+const dbPath = RAILWAY_CONFIG.IS_RAILWAY ? 
+    '/tmp/trading_bot.db' : 
+    path.join(__dirname, 'trading_bot.db');
 const db = new sqlite3.Database(dbPath);
 
 // Trading Engine State
@@ -636,7 +641,12 @@ async function monitorPricesAndTrade() {
  */
 async function getCurrentPrices() {
     try {
-        const response = await fetch('http://localhost:3003/api/binance/ticker');
+        // Use Railway proxy URL if on Railway, otherwise localhost
+        const binanceProxyUrl = RAILWAY_CONFIG.IS_RAILWAY ? 
+            'https://binance-proxy-production.up.railway.app/api/binance/ticker' : 
+            'http://localhost:3003/api/binance/ticker';
+            
+        const response = await fetch(binanceProxyUrl);
         const data = await response.json();
         
         const prices = {};
