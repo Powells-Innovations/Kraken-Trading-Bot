@@ -8,7 +8,8 @@
 
 class BackendAPI {
     constructor() {
-        this.baseUrl = 'http://localhost:8000/api';
+        // Use Railway URL if available, otherwise localhost
+        this.baseUrl = window.RAILWAY_CONFIG?.BACKEND_API_BASE || 'http://localhost:8000/api';
         this.userId = 'default_user'; // You can make this configurable
         this.isConnected = false;
     }
