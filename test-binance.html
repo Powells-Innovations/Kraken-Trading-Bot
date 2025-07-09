@@ -1,0 +1,212 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Binance API Test</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 20px;
+            background-color: #1a1a1a;
+            color: #fff;
+        }
+        .test-section {
+            background-color: #2a2a2a;
+            padding: 20px;
+            margin: 20px 0;
+            border-radius: 8px;
+        }
+        .success { color: #00ff88; }
+        .error { color: #ff4444; }
+        .warning { color: #ffc107; }
+        .info { color: #00bcd4; }
+        button {
+            background-color: #007bff;
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 4px;
+            cursor: pointer;
+            margin: 5px;
+        }
+        button:hover {
+            background-color: #0056b3;
+        }
+        pre {
+            background-color: #333;
+            padding: 10px;
+            border-radius: 4px;
+            overflow-x: auto;
+        }
+    </style>
+</head>
+<body>
+    <h1>🔗 Binance API Test</h1>
+    
+    <div class="test-section">
+        <h2>Connection Test</h2>
+        <button onclick="testConnection()">Test Connection</button>
+        <div id="connection-result"></div>
+    </div>
+
+    <div class="test-section">
+        <h2>Ticker Data Test</h2>
+        <button onclick="testTickerData()">Get Ticker Data</button>
+        <div id="ticker-result"></div>
+    </div>
+
+    <div class="test-section">
+        <h2>OHLC Data Test</h2>
+        <button onclick="testOHLCData()">Get OHLC Data</button>
+        <div id="ohlc-result"></div>
+    </div>
+
+    <div class="test-section">
+        <h2>Current Price Test</h2>
+        <button onclick="testCurrentPrice()">Get Current Price</button>
+        <div id="price-result"></div>
+    </div>
+
+    <div class="test-section">
+        <h2>Exchange Info Test</h2>
+        <button onclick="testExchangeInfo()">Get Exchange Info</button>
+        <div id="exchange-result"></div>
+    </div>
+
+    <script src="binance-api.js"></script>
+    <script>
+        let binanceAPI = null;
+
+        function log(message, type = 'info') {
+            console.log(`[${type.toUpperCase()}] ${message}`);
+        }
+
+        function displayResult(elementId, content, type = 'info') {
+            const element = document.getElementById(elementId);
+            const className = type === 'success' ? 'success' : type === 'error' ? 'error' : type === 'warning' ? 'warning' : 'info';
+            element.innerHTML = `<div class="${className}">${content}</div>`;
+        }
+
+        async function testConnection() {
+            try {
+                log('Testing Binance API connection via proxy...', 'info');
+                binanceAPI = new BinanceAPI();
+                const connected = await binanceAPI.connect();
+                
+                if (connected) {
+                    displayResult('connection-result', '✅ Successfully connected to Binance API via proxy', 'success');
+                    log('Connection test successful', 'success');
+                } else {
+                    displayResult('connection-result', '❌ Failed to connect to Binance API via proxy', 'error');
+                    log('Connection test failed', 'error');
+                }
+            } catch (error) {
+                displayResult('connection-result', `❌ Connection error: ${error.message}`, 'error');
+                log(`Connection error: ${error.message}`, 'error');
+            }
+        }
+
+        async function testTickerData() {
+            try {
+                if (!binanceAPI || !binanceAPI.isConnected) {
+                    displayResult('ticker-result', '❌ Please connect to Binance API first', 'error');
+                    return;
+                }
+
+                log('Fetching ticker data...', 'info');
+                const tickerData = await binanceAPI.getTickerData();
+                
+                const result = Object.keys(tickerData).map(symbol => {
+                    const data = tickerData[symbol];
+                    return `${symbol}: £${data.price.toFixed(4)} (${data.change24h >= 0 ? '+' : ''}${data.change24h.toFixed(2)}%)`;
+                }).join('<br>');
+
+                displayResult('ticker-result', `✅ Ticker data received:<br>${result}`, 'success');
+                log(`Ticker data received for ${Object.keys(tickerData).length} pairs`, 'success');
+            } catch (error) {
+                displayResult('ticker-result', `❌ Ticker error: ${error.message}`, 'error');
+                log(`Ticker error: ${error.message}`, 'error');
+            }
+        }
+
+        async function testOHLCData() {
+            try {
+                if (!binanceAPI || !binanceAPI.isConnected) {
+                    displayResult('ohlc-result', '❌ Please connect to Binance API first', 'error');
+                    return;
+                }
+
+                log('Fetching OHLC data for BTCGBP...', 'info');
+                const ohlcData = await binanceAPI.getOHLCData('BTCGBP', 1, null, 1); // 1-minute candles, 1 day
+                
+                if (ohlcData && ohlcData.length > 0) {
+                    const latest = ohlcData[ohlcData.length - 1];
+                    const result = `✅ OHLC data received:<br>
+                        Total candles: ${ohlcData.length}<br>
+                        Latest candle: O:£${latest.open.toFixed(4)} H:£${latest.high.toFixed(4)} L:£${latest.low.toFixed(4)} C:£${latest.close.toFixed(4)}<br>
+                        Time: ${new Date(latest.time).toLocaleString()}`;
+                    
+                    displayResult('ohlc-result', result, 'success');
+                    log(`OHLC data received: ${ohlcData.length} candles`, 'success');
+                } else {
+                    displayResult('ohlc-result', '❌ No OHLC data received', 'error');
+                    log('No OHLC data received', 'error');
+                }
+            } catch (error) {
+                displayResult('ohlc-result', `❌ OHLC error: ${error.message}`, 'error');
+                log(`OHLC error: ${error.message}`, 'error');
+            }
+        }
+
+        async function testCurrentPrice() {
+            try {
+                if (!binanceAPI || !binanceAPI.isConnected) {
+                    displayResult('price-result', '❌ Please connect to Binance API first', 'error');
+                    return;
+                }
+
+                log('Fetching current price for BTCGBP...', 'info');
+                const price = await binanceAPI.getCurrentPrice('BTCGBP');
+                
+                displayResult('price-result', `✅ Current BTCGBP price: £${price.toFixed(4)}`, 'success');
+                log(`Current price: £${price.toFixed(4)}`, 'success');
+            } catch (error) {
+                displayResult('price-result', `❌ Price error: ${error.message}`, 'error');
+                log(`Price error: ${error.message}`, 'error');
+            }
+        }
+
+        async function testExchangeInfo() {
+            try {
+                if (!binanceAPI || !binanceAPI.isConnected) {
+                    displayResult('exchange-result', '❌ Please connect to Binance API first', 'error');
+                    return;
+                }
+
+                log('Fetching exchange info...', 'info');
+                const exchangeInfo = await binanceAPI.getExchangeInfo();
+                
+                const symbols = exchangeInfo.symbols.filter(s => s.status === 'TRADING').slice(0, 10);
+                const result = `✅ Exchange info received:<br>
+                    Total symbols: ${exchangeInfo.symbols.length}<br>
+                    Trading symbols: ${exchangeInfo.symbols.filter(s => s.status === 'TRADING').length}<br>
+                    First 10 trading symbols: ${symbols.map(s => s.symbol).join(', ')}`;
+                
+                displayResult('exchange-result', result, 'success');
+                log(`Exchange info received: ${exchangeInfo.symbols.length} symbols`, 'success');
+            } catch (error) {
+                displayResult('exchange-result', `❌ Exchange info error: ${error.message}`, 'error');
+                log(`Exchange info error: ${error.message}`, 'error');
+            }
+        }
+
+        // Auto-run connection test on page load
+        window.addEventListener('load', () => {
+            testConnection();
+        });
+    </script>
+</body>
+</html> 

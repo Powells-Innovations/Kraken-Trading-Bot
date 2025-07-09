@@ -1,0 +1,32 @@
+{
+  "name": "trading-bot-backend",
+  "version": "1.0.0",
+  "description": "Backend server for Trading Bot with persistent storage",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "nodemon server.js",
+    "install-deps": "npm install"
+  },
+  "keywords": [
+    "trading",
+    "bot",
+    "crypto",
+    "api",
+    "backend"
+  ],
+  "author": "Trading Bot AI",
+  "license": "UNLICENSED",
+  "dependencies": {
+    "cors": "^2.8.5",
+    "express": "^4.18.2",
+    "node-fetch": "^2.6.7",
+    "sqlite3": "^5.1.6"
+  },
+  "devDependencies": {
+    "nodemon": "^3.0.1"
+  },
+  "engines": {
+    "node": ">=16.0.0"
+  }
+}
