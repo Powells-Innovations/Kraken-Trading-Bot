@@ -16,7 +16,8 @@
 
 class BinanceAPI {
     constructor() {
-        this.baseUrl = 'http://localhost:3003/api/binance';
+        // Use Railway URL if available, otherwise localhost
+        this.baseUrl = window.RAILWAY_CONFIG?.BINANCE_API_BASE || 'http://localhost:3003/api/binance';
         this.isConnected = false;
         this.lastUpdate = null;
         this.retryCount = 0;
