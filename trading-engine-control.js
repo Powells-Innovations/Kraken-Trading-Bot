@@ -5,7 +5,7 @@
 
 const fetch = require('node-fetch');
 
-const BASE_URL = 'http://localhost:8000/api';
+const BASE_URL = window.RAILWAY_CONFIG?.BACKEND_API_BASE || 'http://localhost:8000/api';
 
 async function makeRequest(endpoint, method = 'GET', body = null) {
     try {
